@@ -26,7 +26,7 @@ Author: Semantica Contributors
 License: MIT
 """
 
-from typing import Any, Dict, List, Optional, Union, Triplets
+from typing import Any, Dict, List, Optional, Union
 
 from ..semantic_extract.triplet_extractor import Triplet
 from ..utils.exceptions import ProcessingError, ValidationError

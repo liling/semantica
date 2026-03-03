@@ -32,6 +32,11 @@ class TestHelpers(unittest.TestCase):
         merged = helpers.merge_dicts(dict1, dict2, deep=True)
         self.assertEqual(merged, {"a": 1, "b": {"c": 2, "d": 3}, "e": 4})
 
+    def test_safe_import_returns_module_and_flag(self):
+        module, available = helpers.safe_import("json")
+        self.assertTrue(available)
+        self.assertIs(module, json)
+
 class TestValidators(unittest.TestCase):
 
     def test_validate_data_required_fields(self):

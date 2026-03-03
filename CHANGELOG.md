@@ -20,6 +20,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Comprehensive test coverage including delta mode integration tests
   - Complete documentation with usage examples and API references
   - Essential for enterprise-grade, large-scale semantic infrastructure
+- **Deduplication v2 Migration Guide** (PR #344 by @ZohaibHassan16, fixes by @KaifAhmad1):
+  - Added comprehensive MIGRATION_V2.md documentation for Deduplication v2 Epic #333
+  - Documented Candidate Generation V2 with multi-key blocking and phonetic matching
+  - Documented Two-Stage Scoring prefilter with configurable thresholds
+  - Documented Semantic Relationship Deduplication v2 with synonym mapping
+  - Added practical code examples for all V2 features with opt-in configuration
+  - Fixed critical infinite recursion bug in dedup_triplets() function
+  - Completed Epic #333 with comprehensive migration path and documentation
+  - Performance: 5.86x speedup confirmed (129ms vs 754ms) for semantic deduplication
+  - Full backward compatibility maintained with legacy mode as default
+- **Semantic Relationship Deduplication v2** (PR #340 by @ZohaibHassan16, fixes by @KaifAhmad1):
+  - Implemented opt-in semantic relationship deduplication mode (`semantic_v2`) with 6.98x performance improvement
+  - Added canonicalization engine with predicate synonym mapping (`works_for` → `employed_by`)
+  - Implemented fast-path O(1) hash matching for exact canonical signature comparisons
+  - Added weighted semantic scoring (60% predicate + 40% object composition) with explainable `semantic_match_score` metadata
+  - Enhanced `dedup_triplets()` function as first-class API in `methods.py`
+  - Integrated semantic deduplication into merge strategy with canonical key generation
+  - Added literal normalization for whitespace cleanup in object matching
+  - Maintained full backward compatibility with legacy mode as default
+  - Fixed critical infinite recursion bug in `dedup_triplets()` function via registry name checking
+  - Performance: Semantic V2 (~83ms) vs Legacy (~579ms) - 6.98x speedup confirmed
+  - All 13 deduplication benchmarks passing with comprehensive test coverage
+- **Two-Stage Scoring Prefilter** (PR #339 by @ZohaibHassan16):
+  - Implemented opt-in two-stage scoring with fast prefilter gates to eliminate expensive semantic scoring for obvious non-matches
+  - Prefilter gates: type mismatch detection, name length ratio validation, token overlap requirements
+  - Performance improvements: 18-25% faster batch processing with prefilter enabled
+  - Configurable thresholds: `min_length_ratio`, `min_token_overlap_ratio`, `required_shared_token`
+  - Enhanced explainability with score breakdown and rejection reasons in metadata
+  - Complete backward compatibility with default `prefilter_enabled=False`
+
+- **Candidate Generation v2 with Multi-Key Blocking** (PR #338 by @ZohaibHassan16):
+  - Implemented opt-in candidate generation strategies (`legacy`, `blocking_v2`, `hybrid_v2`) to address O(N²) pair explosion during deduplication
+  - Multi-key blocking with normalized token prefixes, type-aware keys, and optional phonetic (Soundex) blocking
+  - Deterministic candidate budgeting with `max_candidates_per_entity` limit using stable sorting
+  - Efficient pair generation with set-based deduplication across overlapping blocks
+  - Performance improvements: 63.6% faster in worst-case scenarios (0.259s → 0.094s for 100 entities)
+  - Complete backward compatibility with default `candidate_strategy="legacy"`
+  - Added configuration options: `blocking_keys`, `enable_phonetic_blocking`, `max_candidates_per_entity`
+
+- **ArangoDB AQL Export Support** (PR #342 by @tibisabau):
+### Added
+
+- **ArangoDB AQL Export Support** (PR #342 by @tibisabau)
+  - Full-featured ArangoDB AQL exporter with 642 lines of production-ready code
+  - Comprehensive AQL INSERT statement generation for vertices and edges
+  - Configurable collection names with validation and sanitization
+  - Batch processing support for large knowledge graphs (default: 1000)
+  - Added export_arango() convenience function for easy access
+  - Enhanced unified export with AQL format support and .aql auto-detection
+  - Added `export_arango()` convenience function for easy access
+  - Enhanced unified export with AQL format support and `.aql` auto-detection
+  - Integrated with method registry for extensibility
+  - 17 comprehensive test cases with 100% pass rate
+  - Enterprise-grade ArangoDB multi-model database integration
+
+- **Apache Parquet Export Support** (PR #343 by @tibisabau):
+- **Apache Parquet Export Support** (PR #343 by @tibisabau)
+  - Full-featured Apache Parquet exporter with 701 lines of production-ready code
+  - Columnar storage format optimized for analytics and data warehousing
+  - Configurable compression codecs (snappy, gzip, brotli, zstd, lz4, none)
+  - Explicit Arrow schemas with type safety and consistency
+  - Field normalization for varied entity and relationship naming conventions
+  - Structured metadata handling using Parquet struct fields
+  - Added export_parquet() convenience function for easy access
+  - Enhanced unified export with Parquet format support and .parquet auto-detection
+  - Added `export_parquet()` convenience function for easy access
+  - Enhanced unified export with Parquet format support and `.parquet` auto-detection
+  - Integrated with method registry for extensibility
+  - 25 comprehensive test cases with 100% pass rate
+  - Enterprise-grade analytics integration with pandas, Spark, Snowflake, BigQuery, Databricks
+
+### Fixed
+- **Fixed NameError**: missing Type import in utils/helpers.py
+
+- Fixed NameError: missing Type import in utils/helpers.py
+  - Added Type to typing imports to fix retry_on_error decorator
+  - Removed unused Type import from config_manager.py
+  - Resolves ImportError when importing semantica modules
+  - Fixes capability gap analysis notebook execution
+
+## [0.3.0-alpha] - 2026-02-19
+
+### Added / Changed
+
+- **Decision Tracking System**: Complete decision lifecycle management with audit trails and provenance tracking
+- **Advanced KG Algorithms**: Node2Vec embeddings, centrality analysis, community detection for decision insights  
+- **Enhanced Context Module**: Unified AgentContext with granular feature flags and decision tracking integration
+- **Vector Store Features**: Hybrid search combining semantic, structural, and category similarity
+- **Policy Management**: Versioning, compliance checking, and exception handling
+- **Production Ready Architecture**: Scalable design with comprehensive error handling and validation
+
+### Fixed
+
+- Fixed import issues in test suite (ProvenanceTracker location fixes)
+- Fixed causal analyzer validation (max_depth bounds checking)
+- Fixed test compatibility with updated method signatures
+- Fixed mock object setup in test suites
+- Comprehensive test suite fixes for decision tracking features
+
+### Testing
+
+- 113+ tests passing across context and core modules
+- Comprehensive decision tracking test coverage
+- Enhanced error handling and edge case testing
+- Fixed all critical test failures for release readiness
+
+### Documentation
+
+- Enhanced context module documentation
+- Updated API references for decision tracking features
+- Comprehensive usage guides and examples
 
 - Fixed: Context Graphs decision tracking bugs and added comprehensive test coverage (PR #315 by @KaifAhmad1)
   - Fixed empty/None decision ID handling in ContextGraph.add_decision()

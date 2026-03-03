@@ -56,15 +56,19 @@ Report Generation:
 Algorithms Used:
 
 RDF Export:
-    - RDF Serialization: Multiple format serialization (Turtle, RDF/XML, JSON-LD, N-Triples, N3)
-    - Namespace Management: Namespace registration, conflict resolution, declaration generation
-    - RDF Validation: RDF syntax validation, triplet validation, namespace validation
+    - RDF Serialization: Multiple format serialization
+      (Turtle, RDF/XML, JSON-LD, N-Triples, N3)
+    - Namespace Management: Namespace registration, conflict resolution,
+      declaration generation
+    - RDF Validation: RDF syntax validation, triplet validation,
+      namespace validation
     - URI Generation: Hash-based and text-based URI assignment for RDF resources
     - Triplet Extraction: Entity and relationship to RDF triplet conversion
     - Format Conversion: Cross-format RDF conversion algorithms
 
 LPG (Labeled Property Graph) Export:
-    - LPG Serialization: Labeled Property Graph format for Neo4j, Memgraph, and similar databases
+    - LPG Serialization: Labeled Property Graph format for Neo4j,
+      Memgraph, and similar databases
     - Node Label Assignment: Entity type to node label mapping
     - Relationship Type Mapping: Relationship type to edge label conversion
     - Property Serialization: Entity and relationship properties to LPG property format
@@ -84,8 +88,10 @@ CSV Export:
     - Field Extraction: Dynamic field name extraction from data structures
     - Delimiter Handling: Configurable delimiter support (comma, tab, semicolon)
     - Header Generation: Automatic CSV header row generation
-    - Metadata Serialization: JSON string serialization for complex metadata fields
-    - Multi-file Export: Knowledge graph split into multiple CSV files (entities, relationships)
+    - Metadata Serialization: JSON string serialization for complex metadata
+      fields
+    - Multi-file Export: Knowledge graph split into multiple CSV files
+      (entities, relationships)
 
 Graph Export:
     - GraphML Serialization: GraphML format generation for graph visualization tools
@@ -153,8 +159,9 @@ Example Usage:
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from ..utils.exceptions import ConfigurationError, ProcessingError
+from ..utils.exceptions import ProcessingError
 from ..utils.logging import get_logger
+from .arango_aql_exporter import ArangoAQLExporter
 from .arrow_exporter import ArrowExporter
 from .config import export_config
 from .csv_exporter import CSVExporter
@@ -162,6 +169,13 @@ from .graph_exporter import GraphExporter
 from .json_exporter import JSONExporter
 from .lpg_exporter import LPGExporter
 from .owl_exporter import OWLExporter
+
+try:
+    from .parquet_exporter import ParquetExporter
+
+    PARQUET_AVAILABLE = True
+except ImportError:
+    PARQUET_AVAILABLE = False
 from .rdf_exporter import RDFExporter
 from .registry import method_registry
 from .report_generator import ReportGenerator
@@ -360,6 +374,66 @@ def export_arrow(
 
     except Exception as e:
         logger.error(f"Failed to export Arrow: {e}")
+        raise
+
+
+def export_parquet(
+    data: Union[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]],
+    file_path: Union[str, Path],
+    compression: str = "snappy",
+    method: str = "default",
+    **kwargs,
+) -> None:
+    """
+    Export data to Apache Parquet format (convenience function).
+
+    This is a user-friendly wrapper that exports data to Parquet columnar format,
+    optimized for analytics and data warehousing workflows.
+
+    Args:
+        data: Data to export (list of dicts or dict with list values)
+        file_path: Output Parquet file path (or base path for multiple files)
+        compression: Compression codec (default: "snappy")
+            - "snappy": Fast compression (default)
+            - "gzip": Better compression ratio
+            - "brotli": Best compression ratio
+            - "zstd": Balanced compression and speed
+            - "lz4": Very fast compression
+            - "none": No compression
+        method: Export method (default: "default")
+        **kwargs: Additional options passed to ParquetExporter
+
+    Examples:
+        >>> from semantica.export.methods import export_parquet
+        >>> export_parquet(entities, "entities.parquet", compression="snappy")
+        >>> export_parquet({"entities": [...], "relationships": [...]}, "output_base")
+    """
+    if not PARQUET_AVAILABLE:
+        raise ImportError(
+            "ParquetExporter is not available. Please install pyarrow with: "
+            "pip install pyarrow"
+        )
+
+    # Check for custom method in registry
+    custom_method = method_registry.get("parquet", method)
+    if custom_method and custom_method is not export_parquet:
+        try:
+            return custom_method(data, file_path, compression=compression, **kwargs)
+        except Exception as e:
+            logger.warning(
+                f"Custom method {method} failed: {e}, falling back to default"
+            )
+
+    try:
+        # Get config
+        config = export_config.get_method_config("parquet")
+        config.update(kwargs)
+
+        exporter = ParquetExporter(compression=compression, **config)
+        exporter.export(data, file_path, **kwargs)
+
+    except Exception as e:
+        logger.error(f"Failed to export Parquet: {e}")
         raise
 
 
@@ -619,6 +693,56 @@ def export_lpg(
         raise
 
 
+def export_arango(
+    knowledge_graph: Dict[str, Any],
+    file_path: Union[str, Path],
+    method: str = "default",
+    **kwargs,
+) -> None:
+    """
+    Export knowledge graph to ArangoDB AQL format (convenience function).
+
+    This is a user-friendly wrapper that exports knowledge graphs to ArangoDB
+    multi-model databases via AQL INSERT statements.
+
+    Args:
+        knowledge_graph: Knowledge graph dictionary with entities and relationships
+        file_path: Output AQL file path
+        method: Export method (default: "default")
+        **kwargs: Additional options passed to ArangoAQLExporter:
+            - vertex_collection: Override default vertex collection name
+            - edge_collection: Override default edge collection name
+            - batch_size: Batch size for INSERT operations
+            - include_collection_creation: Whether to include collection creation statements
+
+    Examples:
+        >>> from semantica.export.methods import export_arango
+        >>> export_arango(kg, "output.aql")
+        >>> export_arango(kg, "graph.aql", vertex_collection="nodes", edge_collection="links")
+    """
+    # Check for custom method in registry
+    custom_method = method_registry.get("arango", method)
+    if custom_method and custom_method is not export_arango:
+        try:
+            return custom_method(knowledge_graph, file_path, **kwargs)
+        except Exception as e:
+            logger.warning(
+                f"Custom method {method} failed: {e}, falling back to default"
+            )
+
+    try:
+        # Get config
+        config = export_config.get_method_config("arango")
+        config.update(kwargs)
+
+        exporter = ArangoAQLExporter(**config)
+        exporter.export_knowledge_graph(knowledge_graph, file_path, **kwargs)
+
+    except Exception as e:
+        logger.error(f"Failed to export ArangoDB AQL: {e}")
+        raise
+
+
 def generate_report(
     data: Dict[str, Any],
     file_path: Union[str, Path],
@@ -685,9 +809,12 @@ def export_knowledge_graph(
     exporter based on the file extension or format parameter.
 
     Args:
-        knowledge_graph: Knowledge graph dictionary with entities and relationships
-        file_path: Output file path (format auto-detected from extension if format not specified)
-        format: Export format (auto-detected from file extension if not specified)
+        knowledge_graph: Knowledge graph dictionary with entities and
+            relationships
+        file_path: Output file path (format auto-detected from extension
+            if format not specified)
+        format: Export format (auto-detected from file extension if not
+            specified)
             - "json", "json-ld": JSONExporter
             - "csv": CSVExporter
             - "ttl", "turtle": RDFExporter (turtle)
@@ -698,6 +825,7 @@ def export_knowledge_graph(
             - "yaml", "yml": YAML exporters
             - "owl": OWLExporter
             - "cypher": LPGExporter
+            - "aql": ArangoAQLExporter
         method: Optional specific export method
         **kwargs: Additional options passed to exporter
 
@@ -724,6 +852,8 @@ def export_knowledge_graph(
             ".yml": "yaml",
             ".owl": "owl-xml",
             ".cypher": "cypher",
+            ".aql": "aql",
+            ".parquet": "parquet",
         }
         format = format_map.get(ext, "json")
 
@@ -742,6 +872,10 @@ def export_knowledge_graph(
         export_owl(knowledge_graph, file_path, format=format, method=method, **kwargs)
     elif format == "cypher":
         export_lpg(knowledge_graph, file_path, method=method, **kwargs)
+    elif format == "aql":
+        export_arango(knowledge_graph, file_path, method=method, **kwargs)
+    elif format == "parquet":
+        export_parquet(knowledge_graph, file_path, method=method, **kwargs)
     else:
         raise ProcessingError(f"Unknown export format: {format}")
 
@@ -751,7 +885,8 @@ def get_export_method(task: str, name: str) -> Optional[Callable]:
     Get a registered export method.
 
     Args:
-        task: Task type ("rdf", "json", "csv", "graph", "yaml", "owl", "vector", "lpg", "report", "export")
+        task: Task type ("rdf", "json", "csv", "graph", "yaml", "owl",
+            "vector", "lpg", "report", "export")
         name: Method name
 
     Returns:
@@ -809,6 +944,8 @@ method_registry.register("vector", "json", export_vector)
 method_registry.register("vector", "numpy", export_vector)
 method_registry.register("lpg", "default", export_lpg)
 method_registry.register("lpg", "cypher", export_lpg)
+method_registry.register("arango", "default", export_arango)
+method_registry.register("arango", "aql", export_arango)
 method_registry.register("report", "default", generate_report)
 method_registry.register("report", "html", generate_report)
 method_registry.register("report", "markdown", generate_report)

@@ -94,7 +94,7 @@ Author: Semantica Contributors
 License: MIT
 """
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
 from ..utils.exceptions import ProcessingError
 from ..utils.logging import get_logger
@@ -259,6 +259,38 @@ def detect_duplicates(
         return detector.incremental_detect(new, existing, **kwargs)
     else:  # pairwise or batch (default)
         return detector.detect_duplicates(entities, **kwargs)
+
+
+def dedup_triplets(
+    relationships: List[Dict[str, Any]],
+    mode: str = "semantic_v2",
+    threshold: float = 0.85,
+    **kwargs,
+) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """
+    Detect duplicate relationships/triplets (convenience function).
+
+    Args:
+        relationships: List of relationship dictionaries to check.
+        mode: Dedup mode ("legacy" or "semantic_v2")
+        threshold: Minimum similarity threshold for fuzzy matching.
+        **kwargs: Additional options for Semantic mode:
+            - predicate_synonym_map: Dict mapping synonyms to canonical predicates.
+            - literal_normalization_enabled: Boolean to enable literal normalization.
+
+    Returns:
+        List of duplicate relationship piars (rel1, rel2).
+    """
+
+    # Check for custom method in registry (but not ourself)
+    custom_method = method_registry.get("detection", "triplets")
+    if custom_method and custom_method.__name__ != "dedup_triplets":
+        return custom_method(relationships, mode=mode, threshold=threshold, **kwargs)
+
+    detector = DuplicateDetector(**kwargs)
+    options = {"threshold": threshold, "relationship_dedup_mode": mode, **kwargs}
+
+    return detector.detect_relationship_duplicates(relationships, **options)
 
 
 def merge_entities(
@@ -535,3 +567,4 @@ method_registry.register("similarity", "multi_factor", _multi_factor_similarity)
 method_registry.register("detection", "pairwise", _pairwise_detection)
 method_registry.register("merging", "keep_most_complete", _keep_most_complete_merging)
 method_registry.register("clustering", "graph_based", _graph_based_clustering)
+method_registry.register("detection", "triplets", dedup_triplets)

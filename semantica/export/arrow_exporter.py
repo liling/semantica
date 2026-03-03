@@ -24,48 +24,122 @@ Author: Semantica Contributors
 License: MIT
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+if TYPE_CHECKING:
+    import pyarrow as pa  # noqa: F401
+
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 try:
-    import pyarrow as pa
+    import pyarrow as pa  # noqa: F811
     import pyarrow.ipc as ipc
+
     ARROW_AVAILABLE = True
+
+    # Explicit Arrow Schemas (no inference)
+    ENTITY_SCHEMA = pa.schema(
+        [
+            pa.field("id", pa.string(), nullable=False),
+            pa.field("text", pa.string(), nullable=True),
+            pa.field("type", pa.string(), nullable=True),
+            pa.field("confidence", pa.float64(), nullable=True),
+            pa.field("start", pa.int64(), nullable=True),
+            pa.field("end", pa.int64(), nullable=True),
+            pa.field(
+                "metadata",
+                pa.struct(
+                    [
+                        pa.field("keys", pa.list_(pa.string())),
+                        pa.field("values", pa.list_(pa.string())),
+                    ]
+                ),
+                nullable=True,
+            ),
+        ]
+    )
+
+    RELATIONSHIP_SCHEMA = pa.schema(
+        [
+            pa.field("id", pa.string(), nullable=False),
+            pa.field("source_id", pa.string(), nullable=False),
+            pa.field("target_id", pa.string(), nullable=False),
+            pa.field("type", pa.string(), nullable=True),
+            pa.field("confidence", pa.float64(), nullable=True),
+            pa.field(
+                "metadata",
+                pa.struct(
+                    [
+                        pa.field("keys", pa.list_(pa.string())),
+                        pa.field("values", pa.list_(pa.string())),
+                    ]
+                ),
+                nullable=True,
+            ),
+        ]
+    )
 except ImportError:
     ARROW_AVAILABLE = False
+    ENTITY_SCHEMA = None
+    RELATIONSHIP_SCHEMA = None
+    pa = None  # Set pa to None when not available
 
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.helpers import ensure_directory
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
 
-
 # Explicit Arrow Schemas (no inference)
-ENTITY_SCHEMA = pa.schema([
-    pa.field("id", pa.string(), nullable=False),
-    pa.field("text", pa.string(), nullable=True),
-    pa.field("type", pa.string(), nullable=True),
-    pa.field("confidence", pa.float64(), nullable=True),
-    pa.field("start", pa.int64(), nullable=True),
-    pa.field("end", pa.int64(), nullable=True),
-    pa.field("metadata", pa.struct([
-        pa.field("keys", pa.list_(pa.string())),
-        pa.field("values", pa.list_(pa.string()))
-    ]), nullable=True),
-])
+if ARROW_AVAILABLE:
+    ENTITY_SCHEMA = pa.schema(
+        [
+            pa.field("id", pa.string(), nullable=False),
+            pa.field("text", pa.string(), nullable=True),
+            pa.field("type", pa.string(), nullable=True),
+            pa.field("confidence", pa.float64(), nullable=True),
+            pa.field("start", pa.int64(), nullable=True),
+            pa.field("end", pa.int64(), nullable=True),
+            pa.field(
+                "metadata",
+                pa.struct(
+                    [
+                        pa.field("keys", pa.list_(pa.string())),
+                        pa.field("values", pa.list_(pa.string())),
+                    ]
+                ),
+                nullable=True,
+            ),
+        ]
+    )
 
-RELATIONSHIP_SCHEMA = pa.schema([
-    pa.field("id", pa.string(), nullable=False),
-    pa.field("source_id", pa.string(), nullable=False),
-    pa.field("target_id", pa.string(), nullable=False),
-    pa.field("type", pa.string(), nullable=True),
-    pa.field("confidence", pa.float64(), nullable=True),
-    pa.field("metadata", pa.struct([
-        pa.field("keys", pa.list_(pa.string())),
-        pa.field("values", pa.list_(pa.string()))
-    ]), nullable=True),
-])
+    RELATIONSHIP_SCHEMA = pa.schema(
+        [
+            pa.field("id", pa.string(), nullable=False),
+            pa.field("source_id", pa.string(), nullable=False),
+            pa.field("target_id", pa.string(), nullable=False),
+            pa.field("type", pa.string(), nullable=True),
+            pa.field("confidence", pa.float64(), nullable=True),
+            pa.field(
+                "metadata",
+                pa.struct(
+                    [
+                        pa.field("keys", pa.list_(pa.string())),
+                        pa.field("values", pa.list_(pa.string())),
+                    ]
+                ),
+                nullable=True,
+            ),
+        ]
+    )
+else:
+    ENTITY_SCHEMA = None
+    RELATIONSHIP_SCHEMA = None
 
 
 class ArrowExporter:
@@ -131,15 +205,13 @@ class ArrowExporter:
         if not self.progress_tracker.enabled:
             self.progress_tracker.enabled = True
 
-        self.logger.debug(
-            f"Arrow exporter initialized: compression={compression}"
-        )
+        self.logger.debug(f"Arrow exporter initialized: compression={compression}")
 
     def export(
         self,
         data: Union[List[Dict[str, Any]], Dict[str, Any]],
         file_path: Union[str, Path],
-        schema: Optional[pa.Schema] = None,
+        schema: Optional["pa.Schema"] = None,
         **options,
     ) -> None:
         """
@@ -187,29 +259,33 @@ class ArrowExporter:
                 # Export each key as separate Arrow file
                 exported_files = []
                 self.progress_tracker.update_tracking(
-                    tracking_id, message=f"Exporting {len(data)} data groups..."
+                    tracking_id,
+                    message=f"Exporting {len(data)} data groups...",
                 )
                 for key, value in data.items():
                     if isinstance(value, list):
                         output_path = file_path.parent / f"{file_path.stem}_{key}.arrow"
-                        
+
                         # Select schema based on key
                         key_schema = schema
                         if key == "entities" and schema is None:
                             key_schema = ENTITY_SCHEMA
                         elif key == "relationships" and schema is None:
                             key_schema = RELATIONSHIP_SCHEMA
-                        
-                        self._write_arrow(value, output_path, schema=key_schema, **options)
+
+                        self._write_arrow(
+                            value, output_path, schema=key_schema, **options
+                        )
                         exported_files.append(output_path)
                     else:
                         self.logger.warning(
-                            f"Skipping key '{key}': value is not a list (type: {type(value)})"
+                            f"Skipping key '{key}': value is not a list "
+                            f"(type: {type(value)})"
                         )
 
                 self.logger.info(
-                    f"Exported {len(exported_files)} Arrow file(s) from dictionary: "
-                    f"{', '.join(str(f) for f in exported_files)}"
+                    f"Exported {len(exported_files)} Arrow file(s) from "
+                    f"dictionary: {', '.join(str(f) for f in exported_files)}"
                 )
                 self.progress_tracker.stop_tracking(
                     tracking_id,
@@ -219,7 +295,8 @@ class ArrowExporter:
             elif isinstance(data, list):
                 # Single Arrow file
                 self.progress_tracker.update_tracking(
-                    tracking_id, message=f"Exporting {len(data)} records..."
+                    tracking_id,
+                    message=f"Exporting {len(data)} records...",
                 )
                 self._write_arrow(data, file_path, schema=schema, **options)
                 self.logger.info(f"Exported Arrow to: {file_path}")
@@ -300,7 +377,8 @@ class ArrowExporter:
                     confidence = float(confidence)
                 except (TypeError, ValueError):
                     self.logger.warning(
-                        f"Invalid confidence value for entity {i}: {confidence}. Setting to None."
+                        f"Invalid confidence value for entity {i}: "
+                        f"{confidence}. Setting to None."
                     )
                     confidence = None
 
@@ -337,7 +415,9 @@ class ArrowExporter:
             f"Normalized {len(normalized_entities)} entity(ies) for Arrow export"
         )
 
-        self._write_arrow(normalized_entities, file_path, schema=ENTITY_SCHEMA, **options)
+        self._write_arrow(
+            normalized_entities, file_path, schema=ENTITY_SCHEMA, **options
+        )
 
     def export_relationships(
         self,
@@ -370,8 +450,10 @@ class ArrowExporter:
 
         Example:
             >>> relationships = [
-            ...     {"id": "r1", "source_id": "e1", "target_id": "e2", "type": "RELATED_TO"},
-            ...     {"source": "e2", "target": "e3", "relationship_type": "CONTAINS"}
+            ...     {"id": "r1", "source_id": "e1", "target_id": "e2",
+            ...      "type": "RELATED_TO"},
+            ...     {"source": "e2", "target": "e3",
+            ...      "relationship_type": "CONTAINS"}
             ... ]
             >>> exporter.export_relationships(relationships, "relationships.arrow")
         """
@@ -402,7 +484,8 @@ class ArrowExporter:
                     confidence = float(confidence)
                 except (TypeError, ValueError):
                     self.logger.warning(
-                        f"Invalid confidence value for relationship {i}: {confidence}. Setting to None."
+                        f"Invalid confidence value for relationship {i}: "
+                        f"{confidence}. Setting to None."
                     )
                     confidence = None
 
@@ -426,7 +509,9 @@ class ArrowExporter:
             f"Normalized {len(normalized_rels)} relationship(s) for Arrow export"
         )
 
-        self._write_arrow(normalized_rels, file_path, schema=RELATIONSHIP_SCHEMA, **options)
+        self._write_arrow(
+            normalized_rels, file_path, schema=RELATIONSHIP_SCHEMA, **options
+        )
 
     def export_knowledge_graph(
         self, knowledge_graph: Dict[str, Any], base_path: Union[str, Path], **options
@@ -533,7 +618,7 @@ class ArrowExporter:
         self,
         data: List[Dict[str, Any]],
         file_path: Path,
-        schema: Optional[pa.Schema] = None,
+        schema: Optional["pa.Schema"] = None,
         **options,
     ) -> None:
         """
@@ -559,25 +644,26 @@ class ArrowExporter:
         if schema is None:
             # Try to detect if data looks like entities or relationships
             sample = data[0] if data else {}
-            
+
             # Check for relationship-specific fields
-            has_source = any(k in sample for k in ['source_id', 'source'])
-            has_target = any(k in sample for k in ['target_id', 'target'])
-            
+            has_source = any(k in sample for k in ["source_id", "source"])
+            has_target = any(k in sample for k in ["target_id", "target"])
+
             # Check for entity-specific fields
-            has_text = any(k in sample for k in ['text', 'label', 'name'])
-            
+            has_text = any(k in sample for k in ["text", "label", "name"])
+
             if has_source and has_target:
                 schema = RELATIONSHIP_SCHEMA
                 self.logger.debug("Auto-detected relationship schema")
-            elif has_text or 'type' in sample:
+            elif has_text or "type" in sample:
                 schema = ENTITY_SCHEMA
                 self.logger.debug("Auto-detected entity schema")
             else:
                 raise ValidationError(
                     "Schema is required for Arrow export. "
                     "Cannot auto-detect schema from data structure. "
-                    "Provide explicit schema or use export_entities/export_relationships methods."
+                    "Provide explicit schema or use "
+                    "export_entities/export_relationships methods."
                 )
 
         self.logger.debug(
@@ -590,7 +676,7 @@ class ArrowExporter:
             table = pa.Table.from_pylist(data, schema=schema)
 
             # Write to Arrow IPC file
-            with pa.OSFile(str(file_path), 'wb') as sink:
+            with pa.OSFile(str(file_path), "wb") as sink:
                 with ipc.new_file(sink, schema) as writer:
                     writer.write_table(table)
 

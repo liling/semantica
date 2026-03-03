@@ -493,23 +493,46 @@ class MergeStrategyManager:
     def _merge_relationships(
         self, entities: List[Dict[str, Any]], base_entity: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Merge relationships from all entities."""
+        """Merge relationships from all entities with canonicalization support."""
+        
         all_relationships = []
         seen_relationships = set()
-
+        
+        dedup_mode = self.config.get("relationship_dedup_mode", "legacy")
+        synonym_map = self.config.get("predicate_synonym_map", {})
+        norm_enabled = self.config.get("literal_normalization_enabled", False)
+        
+        def _normalize_literal(val: Any) -> Any:
+            if not norm_enabled or not isinstance(val, str):
+                return val
+            
+            return " ".join(val.lower().split())
+        
         for entity in entities:
             relationships = entity.get("relationships", [])
-
+            
             for rel in relationships:
-                # Create unique key for relationship
-                rel_key = (rel.get("subject"), rel.get("predicate"), rel.get("object"))
-
+                subj = rel.get("subject")
+                pred = str(rel.get("predicate", ""))
+                obj = rel.get("object")
+                
+                if dedup_mode == "semantic_v2":
+                    canon_pred = synonym_map.get(pred.lower(), pred).lower()
+                    canon_obj = _normalize_literal(obj)
+                    rel_key = (subj, canon_pred, canon_obj)
+                
+                else:
+                    rel_key = (subj, pred, obj)
+                
                 if rel_key not in seen_relationships:
                     all_relationships.append(rel)
                     seen_relationships.add(rel_key)
 
+        
         return all_relationships
 
+       
+       
     def _merge_metadata(
         self, entities: List[Dict[str, Any]], base_entity: Dict[str, Any]
     ) -> Dict[str, Any]:

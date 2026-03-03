@@ -340,10 +340,10 @@ class TemporalVersionManager(BaseVersionManager):
         """
         Prune old snapshots, keeping only the most recent N versions.
         Optionally deletes the backend graphs from the triplet store to free space.
-        
+
         Args:
             keep_last_n: Number of recent versions to retain.
-            triplet_store: Optional TripletScore instance to execute DROP GRAPH.
+            triplet_store: Optional TripletStore instance to execute DROP GRAPH.
             
         Returns:
             Dict containing counts and labels of pruned versions.

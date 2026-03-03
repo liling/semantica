@@ -49,13 +49,13 @@ def create_graph_snapshot_record(
 ) -> Dict[str, Any]:
     """
     Creates a standardized snapshot metadata record for a named graph.
-    
+
     Args:
         version_id: Unique identifier for this snapshot
         graph_uri: The underlying named graph URI in the triplet store
         author: Creator of the snapshot
         description: Purpose or context of the snapshot
-        metadata: Additional tags or piepline context
+        metadata: Additional tags or pipeline context
     """
     
     record = {

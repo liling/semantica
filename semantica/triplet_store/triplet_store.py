@@ -445,7 +445,7 @@ class TripletStore:
         
         tracking_id = self.progress_tracker.start_tracking(
             module="triplet_store",
-            submodule="COmputeDelta",
+            submodule="ComputeDelta",
             message=f"Computing delta: {old_graph_uri} -> {new_graph_uri}",
         )
         
@@ -453,7 +453,7 @@ class TripletStore:
         added_query = f"""
         SELECT ?s ?p ?o WHERE {{
             GRAPH <{new_graph_uri} > {{ ?s ?p ?o }}
-            FILTER NOT EXISTS {{ GRAPH <{old_graph_uri}> {{ ?s ?o ?p}} }}
+            FILTER NOT EXISTS {{ GRAPH <{old_graph_uri}> {{ ?s ?p ?o}} }}
         }}
         """
         
@@ -478,10 +478,10 @@ class TripletStore:
                     s = b.get("s", {}).get("value") if isinstance(b.get("s"), dict) else b.get("s")
                     p = b.get("p", {}).get("value") if isinstance(b.get("p"), dict) else b.get("p")
                     o = b.get("o", {}).get("value") if isinstance(b.get("o"), dict) else b.get("o")
-                    
+
                     if s and p and o:
-                        triplets.append(Triplets(s, p, o))
-                
+                        triplets.append(Triplet(s, p, o))
+
                 return triplets
             
             added_triples = extract_triplets(added_res.bindings)
@@ -490,7 +490,7 @@ class TripletStore:
             self.progress_tracker.stop_tracking(
                 tracking_id,
                 status="completed",
-                message=f"Delte computed: +{len(added_triples)} / -{len(removed_triples)}"
+                message=f"Delta computed: +{len(added_triples)} / -{len(removed_triples)}"
             )
             
             return {
@@ -499,7 +499,7 @@ class TripletStore:
                 "added_triples": added_triples,
                 "removed_triples": removed_triples,
                 "added_count": len(added_triples),
-                "removed_triples": len(removed_triples),
+                "removed_count": len(removed_triples),
             }
             
         except Exception as e:

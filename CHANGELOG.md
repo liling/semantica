@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **TTL Export Alias Fix** (PR #355 by @KaifAhmad1):
+  - Added `_format_aliases` map in `RDFExporter` so `format="ttl"`, `"nt"`, `"xml"`, `"rdf"`, and `"json-ld"` resolve to their canonical counterparts without breaking existing callers
+  - Alias resolution applied at the top of `export_to_rdf()` before format validation — zero public API changes
+  - Added working TTL export cell to `cookbook/introduction/15_Export.ipynb` (Step 3: RDF Export)
+  - Added `tests/export/test_rdf_exporter.py` with 8 tests covering all aliases, canonical formats, error handling, and file export
+
 - **Incremental/Delta Processing Feature** (PR #349 by @ZohaibHassan16, reviewed and fixed by @KaifAhmad1):
   - Native delta computation between graph snapshots using SPARQL queries
   - Delta-aware pipeline execution with `delta_mode` configuration for processing only changed data

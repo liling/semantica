@@ -100,7 +100,7 @@ pip install semantica
 - **Change management** — version control with checksums, audit trails, compliance support
 
 ### Vector Store
-- **Backends** — FAISS, in-memory
+- **Backends** — FAISS, Pinecone, Weaviate, Qdrant, Milvus, PgVector, in-memory
 - **Semantic search** — top-k retrieval by embedding similarity
 - **Hybrid search** — vector + keyword with configurable weights
 - **Filtered search** — metadata-based filtering on any field
@@ -115,6 +115,7 @@ pip install semantica
 - **File formats** — PDF, DOCX, HTML, JSON, CSV, Excel, PPTX, archives
 - **Web crawl** — `WebIngestor` with configurable depth
 - **Databases** — `DBIngestor` with SQL query support
+- **Snowflake** — `SnowflakeIngestor` with table/query ingestion, pagination, and key-pair/OAuth auth
 - **Docling** — advanced document parsing with table and layout extraction (PDF, DOCX, PPTX, XLSX)
 - **Media** — image OCR, audio/video metadata extraction
 
@@ -142,15 +143,30 @@ pip install semantica
 
 | Module | What it provides |
 |---|---|
-| `semantica.context` | Context graphs, agent memory, decision tracking, policy engine, causal chains |
-| `semantica.kg` | Knowledge graphs, graph algorithms, embeddings, link prediction, provenance |
-| `semantica.semantic_extract` | Entity & relation extraction, deduplication, triplet generation |
-| `semantica.reasoning` | Forward chaining, Rete, deductive, abductive, SPARQL reasoning |
-| `semantica.vector_store` | FAISS, in-memory, hybrid search with custom similarity weights |
-| `semantica.export` | RDF (Turtle/JSON-LD/N-Triples/XML), Parquet, ArangoDB AQL |
-| `semantica.ingest` | Files (PDF, DOCX, CSV, HTML), web crawl, databases, Docling |
-| `semantica.ontology` | OWL generation, import (OWL/RDF/Turtle/JSON-LD), validation |
-| `semantica.pipeline` | Parallel workers, validation, failure handling, retry policies |
+| `semantica.context` | Context graphs, agent memory, decision tracking, causal analysis, precedent search, policy engine |
+| `semantica.kg` | Knowledge graph construction, graph algorithms, centrality, community detection, embeddings, link prediction, provenance |
+| `semantica.semantic_extract` | NER, relation extraction, event extraction, coreference, triplet generation, LLM-enhanced extraction |
+| `semantica.reasoning` | Forward chaining, Rete network, deductive, abductive, SPARQL reasoning, explanation generation |
+| `semantica.vector_store` | FAISS, Pinecone, Weaviate, Qdrant, Milvus, PgVector, in-memory; hybrid & filtered search |
+| `semantica.export` | RDF (Turtle/JSON-LD/N-Triples/XML), Parquet, ArangoDB AQL, CSV, YAML, OWL, graph formats |
+| `semantica.ingest` | Files (PDF, DOCX, CSV, HTML), web crawl, feeds, databases, Snowflake, MCP, email, repositories |
+| `semantica.ontology` | Auto-generation (6-stage pipeline), OWL/RDF export, import (OWL/RDF/Turtle/JSON-LD), validation, versioning |
+| `semantica.pipeline` | Pipeline DSL, parallel workers, validation, retry policies, failure handling, resource scheduling |
+| `semantica.graph_store` | Graph database backends — Neo4j, FalkorDB, Apache AGE, Amazon Neptune; Cypher queries |
+| `semantica.embeddings` | Text embedding generation — Sentence-Transformers, FastEmbed, OpenAI, BGE; similarity calculation |
+| `semantica.deduplication` | Entity deduplication, similarity scoring, merging, clustering; blocking and semantic strategies |
+| `semantica.provenance` | W3C PROV-O compliant end-to-end lineage tracking, source attribution, audit trails |
+| `semantica.parse` | Document parsing — PDF, DOCX, PPTX, HTML, code, email, structured data, media with OCR |
+| `semantica.split` | Document chunking — recursive, semantic, entity-aware, relation-aware, graph-based, ontology-aware |
+| `semantica.normalize` | Data normalization for text, entities, dates, numbers, quantities, languages, encodings |
+| `semantica.conflicts` | Multi-source conflict detection (value, type, relationship, temporal, logical) with resolution strategies |
+| `semantica.change_management` | Version storage, change tracking, checksums, audit trails, compliance support for KGs and ontologies |
+| `semantica.triplet_store` | RDF triplet store integration — Blazegraph, Jena, RDF4J; SPARQL queries and bulk loading |
+| `semantica.visualization` | Interactive and static visualization of KGs, ontologies, embeddings, analytics, and temporal graphs |
+| `semantica.seed` | Seed data management for initial KG construction from CSV, JSON, databases, and APIs |
+| `semantica.core` | Framework orchestration, configuration management, knowledge base construction, plugin system |
+| `semantica.llms` | LLM provider integrations — Groq, OpenAI, HuggingFace, LiteLLM |
+| `semantica.utils` | Shared utilities — logging, validation, exception handling, constants, types, progress tracking |
 
 ---
 
@@ -252,6 +268,7 @@ influence = context.analyze_decision_influence(decision_id)
 - **Docling Support** — Document parsing with table extraction (PDF, DOCX, PPTX, XLSX)
 - **AWS Neptune** — Amazon Neptune graph database support with IAM authentication
 - **Apache AGE** — PostgreSQL graph extension backend (openCypher via SQL)
+- **Snowflake** — Native ingestion with `SnowflakeIngestor`; table/query ingestion, pagination, key-pair & OAuth auth
 - **Custom Ontology Import** — Import existing ontologies (OWL, RDF, Turtle, JSON-LD)
 
 > **Built for environments where every answer must be explainable and governed.**
@@ -515,6 +532,39 @@ docling = DoclingParser()
 parsed  = docling.parse("financial_report.pdf")
 ```
 
+```python
+from semantica.ingest import SnowflakeIngestor
+
+# Connect to Snowflake and ingest a table
+ingestor = SnowflakeIngestor(
+    account="myorg-myaccount",
+    user="analyst",
+    password="...",
+    warehouse="COMPUTE_WH",
+    database="ANALYTICS",
+    schema="PUBLIC",
+)
+
+# Ingest a table with optional filtering and pagination
+data = ingestor.ingest_table(
+    table_name="customer_events",
+    where="event_date >= '2024-01-01'",
+    limit=10000,
+)
+
+# Or run a custom SQL query
+data = ingestor.ingest_query(
+    query="SELECT id, content, tags FROM knowledge_base WHERE active = TRUE",
+    batch_size=500,
+)
+
+# Convert to Semantica documents for downstream pipeline use
+docs = ingestor.export_as_documents(data, id_field="id", text_fields=["content"])
+
+# Key-pair and OAuth auth are also supported via env vars:
+# SNOWFLAKE_PRIVATE_KEY_PATH, SNOWFLAKE_TOKEN, SNOWFLAKE_AUTHENTICATOR
+```
+
 ---
 
 ## Export
@@ -593,7 +643,15 @@ ontology = importer.load("context.jsonld")
 
 **Vector Databases**
 - FAISS — high-performance dense vector search
+- Pinecone — serverless and pod-based managed vector database (`pip install semantica[vectorstore-pinecone]`)
+- Weaviate — GraphQL-based vector store with rich schema management (`pip install semantica[vectorstore-weaviate]`)
+- Qdrant — collection-based store with payload filtering (`pip install semantica[vectorstore-qdrant]`)
+- Milvus — scalable store with partition support and multiple index types (`pip install semantica[vectorstore-milvus]`)
+- PgVector — PostgreSQL pgvector extension with JSONB metadata (`pip install semantica[vectorstore-pgvector]`)
 - In-memory — lightweight, zero-dependency store for development and testing
+
+**Data Sources**
+- Snowflake — `SnowflakeIngestor` for table/query ingestion, schema introspection, pagination, and multiple auth methods (password, key-pair, OAuth, SSO) (`pip install semantica[db-snowflake]`)
 
 **Document Parsing**
 - Docling — PDF, DOCX, PPTX, XLSX with table and layout extraction
@@ -617,6 +675,16 @@ pip install semantica
 
 # With all optional dependencies
 pip install semantica[all]
+
+# Vector store backends (install only what you need)
+pip install semantica[vectorstore-pinecone]
+pip install semantica[vectorstore-weaviate]
+pip install semantica[vectorstore-qdrant]
+pip install semantica[vectorstore-milvus]
+pip install semantica[vectorstore-pgvector]
+
+# Snowflake ingestion
+pip install semantica[db-snowflake]
 
 # From source
 git clone https://github.com/Hawksight-AI/semantica.git

@@ -270,6 +270,9 @@ class ContextGraph:
 
         self.entity_linker = self.config.get("entity_linker") or EntityLinker()
 
+        # Stable identifier so this graph can be referenced after save/load
+        self.graph_id: str = str(uuid.uuid4())
+
         # Graph structure
         self.nodes: Dict[str, ContextNode] = {}
         self.edges: List[ContextEdge] = []
@@ -283,6 +286,8 @@ class ContextGraph:
 
         # Cross-graph navigation: link_id -> (other_graph, source_node_id, target_node_id)
         self._linked_graphs: Dict[str, Tuple["ContextGraph", str, str]] = {}
+        # Unresolved link metadata (populated after load_from_file, before resolve_links)
+        self._unresolved_links: Dict[str, Dict[str, str]] = {}
 
         # Progress tracker
         self.progress_tracker = get_progress_tracker()
@@ -613,9 +618,24 @@ class ContextGraph:
         """
         import json
 
+        # Serialise cross-graph link metadata (object references are not serialisable,
+        # so we store other_graph_id; callers can reconnect with resolve_links()).
+        links_data = []
+        for link_id, (other_graph, source_node_id, target_node_id) in self._linked_graphs.items():
+            links_data.append(
+                {
+                    "link_id": link_id,
+                    "source_node_id": source_node_id,
+                    "target_node_id": target_node_id,
+                    "other_graph_id": other_graph.graph_id,
+                }
+            )
+
         data = {
+            "graph_id": self.graph_id,
             "nodes": [node.to_dict() for node in self.nodes.values()],
             "edges": [edge.to_dict() for edge in self.edges],
+            "links": links_data,
         }
 
         with open(path, "w", encoding="utf-8") as f:
@@ -646,6 +666,12 @@ class ContextGraph:
         self._adjacency.clear()
         self.node_type_index.clear()
         self.edge_type_index.clear()
+        self._linked_graphs.clear()
+        self._unresolved_links.clear()
+
+        # Restore stable graph identity
+        if "graph_id" in data:
+            self.graph_id = data["graph_id"]
 
         # Load nodes
         nodes = data.get("nodes", [])
@@ -654,6 +680,12 @@ class ContextGraph:
         # Load edges
         edges = data.get("edges", [])
         self.add_edges(edges)
+
+        # Restore link metadata — object references require resolve_links() to reconnect
+        for link_meta in data.get("links", []):
+            link_id = link_meta.get("link_id")
+            if link_id:
+                self._unresolved_links[link_id] = link_meta
 
         self.logger.info(f"Loaded context graph from {path}")
 
@@ -804,12 +836,62 @@ class ContextGraph:
             KeyError: If link_id is not registered on this graph.
         """
         if link_id not in self._linked_graphs:
+            if link_id in self._unresolved_links:
+                meta = self._unresolved_links[link_id]
+                raise KeyError(
+                    f"Cross-graph link '{link_id}' exists but its target graph "
+                    f"(graph_id={meta.get('other_graph_id')!r}) has not been reconnected. "
+                    "Call resolve_links({graph_id: graph_instance, ...}) to restore navigation."
+                )
             raise KeyError(
                 f"No cross-graph link '{link_id}' found. "
                 "Call link_graph() first to create the link."
             )
         other_graph, _, target_node_id = self._linked_graphs[link_id]
         return other_graph, target_node_id
+
+    def resolve_links(self, graphs: Dict[str, "ContextGraph"]) -> int:
+        """
+        Reconnect cross-graph links after a :meth:`load_from_file` call.
+
+        Since ``other_graph`` object references cannot be serialised, links are stored
+        as metadata only (``other_graph_id``).  Call this method with a mapping of
+        ``{graph_id: graph_instance}`` to restore live navigation.
+
+        Args:
+            graphs: Mapping of graph_id strings to ContextGraph instances.
+
+        Returns:
+            Number of links successfully resolved.
+
+        Example::
+
+            g1.save_to_file("g1.json")
+            g2.save_to_file("g2.json")
+
+            g1b, g2b = ContextGraph(), ContextGraph()
+            g1b.load_from_file("g1.json")
+            g2b.load_from_file("g2.json")
+            resolved = g1b.resolve_links({g2b.graph_id: g2b})
+        """
+        resolved = 0
+        for link_id, meta in list(self._unresolved_links.items()):
+            other_graph_id = meta.get("other_graph_id")
+            if other_graph_id in graphs:
+                other_graph = graphs[other_graph_id]
+                source_node_id = meta["source_node_id"]
+                target_node_id = meta["target_node_id"]
+                # Validate target node still exists in the restored graph
+                if target_node_id in other_graph.nodes:
+                    self._linked_graphs[link_id] = (other_graph, source_node_id, target_node_id)
+                    del self._unresolved_links[link_id]
+                    resolved += 1
+                else:
+                    self.logger.warning(
+                        f"resolve_links: target node '{target_node_id}' not found in "
+                        f"graph '{other_graph_id}' for link '{link_id}'"
+                    )
+        return resolved
 
     def find_edges(self, edge_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Find edges, optionally filtered by type."""

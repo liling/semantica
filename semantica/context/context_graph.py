@@ -403,8 +403,8 @@ class ContextGraph:
     def has_node(self, node_id: str) -> bool:
         return node_id in self.nodes
 
-    def neighbors(self, node_id: str) -> List[str]:
-        return self.get_neighbor_ids(node_id)
+    def neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+        return self.get_neighbors(node_id, hops=1)
 
     def get_neighbor_ids(
         self,
@@ -421,8 +421,18 @@ class ContextGraph:
                 neighbor_ids.append(edge.target_id)
         return neighbor_ids
 
-    def get_nodes_by_label(self, label: str) -> List[str]:
-        return list(self.node_type_index.get(label, set()))
+    def get_nodes_by_label(self, label: str) -> List[Dict[str, Any]]:
+        result = []
+        for nid in self.node_type_index.get(label, set()):
+            node = self.nodes.get(nid)
+            if node:
+                result.append({
+                    "id": node.node_id,
+                    "content": node.content,
+                    "type": node.node_type,
+                    "metadata": node.properties,
+                })
+        return result
 
     def get_node_property(self, node_id: str, property_name: str) -> Any:
         node = self.nodes.get(node_id)
@@ -1424,7 +1434,7 @@ class ContextGraph:
                         decision = Decision(
                             decision_id=current_id,
                             category=decision_data.get("category", ""),
-                            scenario=node.content,
+                            scenario=decision_data.get("scenario", node.content),
                             reasoning=decision_data.get("reasoning", ""),
                             outcome=decision_data.get("outcome", ""),
                             confidence=decision_data.get("confidence", 0.0),
@@ -1433,7 +1443,7 @@ class ContextGraph:
                             reasoning_embedding=decision_data.get("reasoning_embedding"),
                             node2vec_embedding=decision_data.get("node2vec_embedding"),
                             metadata={k: v for k, v in decision_data.items() if k not in [
-                                "category", "reasoning", "outcome", "confidence", 
+                                "category", "scenario", "reasoning", "outcome", "confidence", 
                                 "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
                             ]}
                         )
@@ -1489,7 +1499,7 @@ class ContextGraph:
                     decision = Decision(
                         decision_id=pid,
                         category=decision_data.get("category", ""),
-                        scenario=node.content,
+                        scenario=decision_data.get("scenario", node.content),
                         reasoning=decision_data.get("reasoning", ""),
                         outcome=decision_data.get("outcome", ""),
                         confidence=decision_data.get("confidence", 0.0),
@@ -1498,7 +1508,7 @@ class ContextGraph:
                         reasoning_embedding=decision_data.get("reasoning_embedding"),
                         node2vec_embedding=decision_data.get("node2vec_embedding"),
                         metadata={k: v for k, v in decision_data.items() if k not in [
-                            "category", "reasoning", "outcome", "confidence", 
+                            "category", "scenario", "reasoning", "outcome", "confidence", 
                             "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
                         ]}
                     )
@@ -1609,7 +1619,7 @@ class ContextGraph:
     
     def find_similar_nodes(
         self, node_id: str, similarity_type: str = "content", top_k: int = 10
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Dict[str, Any]]:
         """
         Find similar nodes using various similarity measures.
         
@@ -1619,7 +1629,7 @@ class ContextGraph:
             top_k: Number of similar nodes to return
             
         Returns:
-            List of (node_id, similarity_score) tuples
+            List of dicts with node ID, type, content, and similarity score
         """
         if node_id not in self.nodes:
             return []
@@ -1637,10 +1647,15 @@ class ContextGraph:
                     else:
                         similarity = self._calculate_content_similarity(reference_node, other_node)
                     
-                    similar_nodes.append((other_id, similarity))
-            
+                    similar_nodes.append({
+                        "id": other_id,
+                        "content": other_node.content,
+                        "type": other_node.node_type,
+                        "score": similarity,
+                    })
+
             # Sort by similarity and return top_k
-            similar_nodes.sort(key=lambda x: x[1], reverse=True)
+            similar_nodes.sort(key=lambda x: x["score"], reverse=True)
             return similar_nodes[:top_k]
             
         except Exception as e:
@@ -2013,11 +2028,23 @@ class ContextGraph:
             reverse=True
         )
         
+        def _enrich(did: str) -> Dict[str, Any]:
+            dec = self._decisions.get(did, {})
+            return {
+                "decision_id": did,
+                "scenario": dec.get("scenario", ""),
+                "outcome": dec.get("outcome", ""),
+                "category": dec.get("category", ""),
+            }
+
         return {
             "decision_id": decision_id,
-            "direct_influence": list(direct_influence),
-            "indirect_influence": list(indirect_influence),
-            "influence_scores": sorted_influence,
+            "direct_influence": [_enrich(did) for did in direct_influence],
+            "indirect_influence": [_enrich(did) for did in indirect_influence],
+            "influence_scores": [
+                {**_enrich(did), "score": score}
+                for did, score in sorted_influence
+            ],
             "total_influenced": len(influence_scores),
             "max_influence_score": max(influence_scores.values()) if influence_scores else 0.0
         }
@@ -2115,7 +2142,15 @@ class ContextGraph:
                                 potential_causes.append(other_decision_id)
                 
                 for cause_id in potential_causes:
-                    cause_path = path + [{"from": cause_id, "to": current_id, "type": "influences"}]
+                    cause_dec = self._decisions.get(cause_id, {})
+                    hop = {
+                        "from": cause_id,
+                        "from_scenario": cause_dec.get("scenario", ""),
+                        "to": current_id,
+                        "to_scenario": current_decision.get("scenario", ""),
+                        "type": "influences",
+                    }
+                    cause_path = path + [hop]
                     causal_chain.append(cause_path)
                     trace_recursive(cause_id, depth + 1, cause_path)
             
@@ -2185,17 +2220,36 @@ class ContextGraph:
     def _add_decision_to_graph(self, decision: Dict[str, Any]) -> None:
         """Add decision to context graph."""
         try:
+            extra_properties = {
+                key: value
+                for key, value in decision.items()
+                if key not in {
+                    "id",
+                    "category",
+                    "scenario",
+                    "reasoning",
+                    "outcome",
+                    "confidence",
+                    "entities",
+                    "decision_maker",
+                    "timestamp",
+                    "metadata",
+                }
+            }
             # Add decision node
             self.add_node(
                 decision["id"],
                 "decision",
+                content=decision["scenario"],
                 category=decision["category"],
                 outcome=decision["outcome"],
                 confidence=decision["confidence"],
                 timestamp=decision["timestamp"],
-                scenario=decision["scenario"][:100] + "..." if len(decision["scenario"]) > 100 else decision["scenario"],
+                scenario=decision["scenario"],
                 decision_maker=decision.get("decision_maker", ""),
-                reasoning=decision["reasoning"][:200] + "..." if len(decision["reasoning"]) > 200 else decision["reasoning"]
+                reasoning=decision["reasoning"],
+                **(decision.get("metadata") or {}),
+                **extra_properties,
             )
             
             # Add entity nodes and relationships
@@ -2281,8 +2335,11 @@ class ContextGraph:
             )
             
             if similar_nodes:
-                # similar_nodes is List[Tuple[str, float]], extract similarity scores
-                return max(similarity for node_id, similarity in similar_nodes)
+                return max(
+                    item.get("score", 0.0)
+                    for item in similar_nodes
+                    if isinstance(item, dict)
+                )
             
         except Exception as e:
             self.logger.exception("Structural similarity calculation failed")
@@ -2538,7 +2595,7 @@ class ContextGraph:
         node_id: str,
         how_many: int = 10,
         similarity_type: str = "content"
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Dict[str, Any]]:
         """
         Easy way to find nodes similar to a given node.
         
@@ -2548,7 +2605,7 @@ class ContextGraph:
             similarity_type: Type of similarity ("content", "structural")
             
         Returns:
-            List of (node_id, similarity_score) tuples
+            List of dicts with node ID, type, content, and similarity score
         """
         return self.find_similar_nodes(
             node_id=node_id,

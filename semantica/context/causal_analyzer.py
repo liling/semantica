@@ -258,7 +258,8 @@ class CausalChainAnalyzer:
             WHERE ALL(i IN range(0, length(path)-2) |
                      path[i].decision_id <> path[i+1].decision_id)
             RETURN d1.decision_id as decision_id,
-                   [node in nodes(path) | node.decision_id] as loop_path,
+                   d1.scenario as decision_scenario,
+                   [node in nodes(path) | {{decision_id: node.decision_id, scenario: node.scenario, category: node.category}}] as loop_path,
                    length(path) as loop_length
             ORDER BY loop_length
             """

@@ -64,6 +64,23 @@ class TestContextModule(unittest.TestCase):
         # However, checking it runs without error is a good start.
         self.assertIsInstance(linked, list)
 
+    def test_entity_linker_find_similar_entities_returns_dicts(self):
+        linker = EntityLinker(
+            knowledge_graph={
+                "entities": [
+                    {"id": "lang_python", "text": "Python programming language", "type": "Technology"}
+                ]
+            }
+        )
+        linker.assign_uri("lang_python", "Python programming language", "Technology")
+
+        similar = linker.find_similar_entities("Python programming language", threshold=0.5)
+
+        self.assertEqual(len(similar), 1)
+        self.assertEqual(similar[0]["entity_id"], "lang_python")
+        self.assertEqual(similar[0]["text"], "Python programming language")
+        self.assertIn("similarity", similar[0])
+
     # --- ContextGraph Tests ---
     def test_context_graph_operations(self):
         graph = ContextGraph()
@@ -91,6 +108,31 @@ class TestContextModule(unittest.TestCase):
         self.assertEqual(len(neighbors), 1)
         self.assertEqual(neighbors[0]["id"], "n2")
         self.assertEqual(neighbors[0]["relationship"], "knows")
+
+    def test_context_graph_preserves_full_decision_text(self):
+        graph = ContextGraph()
+        scenario = "Launch regional expansion plan " + ("X" * 140)
+        root_id = graph.record_decision(
+            category="strategy",
+            scenario=scenario,
+            reasoning="Growth opportunity with strong local demand",
+            outcome="approved",
+            confidence=0.91,
+        )
+        child_id = graph.record_decision(
+            category="operations",
+            scenario="Open Sao Paulo office",
+            reasoning="Needed to support expansion",
+            outcome="pending",
+            confidence=0.74,
+        )
+        graph.add_causal_relationship(root_id, child_id, "CAUSED")
+
+        chain = graph.get_causal_chain(child_id)
+
+        self.assertEqual(graph.nodes[root_id].content, scenario)
+        self.assertEqual(graph.nodes[root_id].properties["scenario"], scenario)
+        self.assertEqual(chain[0].scenario, scenario)
 
     # --- AgentMemory Tests ---
     def test_agent_memory_store(self):

@@ -302,20 +302,25 @@ class TestDecisionQuery:
         
         mock_graph_store.execute_query.return_value = [
             {
-                "path": "mock_path_1",
+                "path_nodes": [{"decision_id": "d1", "scenario": "S1", "category": "C1"}],
+                "path_rels": [{"from": "d1", "to": "d2", "type": "CAUSED"}],
                 "path_length": 2
             },
             {
-                "path": "mock_path_2",
+                "path_nodes": [{"decision_id": "d2", "scenario": "S2", "category": "C2"}],
+                "path_rels": [],
                 "path_length": 3
             }
         ]
-        
+
         paths = decision_query.trace_decision_path(decision_id, relationship_types)
-        
+
         assert len(paths) == 2
-        assert paths[0]["path"] == "mock_path_1"
         assert paths[0]["path_length"] == 2
+        assert isinstance(paths[0]["nodes"], list)
+        assert isinstance(paths[0]["relationships"], list)
+        assert paths[0]["nodes"][0]["scenario"] == "S1"
+        assert paths[0]["relationships"][0]["type"] == "CAUSED"
         
         # Verify query was called with relationship types
         call_args = mock_graph_store.execute_query.call_args

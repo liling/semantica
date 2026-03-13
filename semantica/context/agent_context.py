@@ -2073,7 +2073,7 @@ class AgentContext:
     
     def find_similar_entities(
         self, entity_id: str, similarity_type: str = "content", top_k: int = 10
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Dict[str, Any]]:
         """
         Find similar entities using advanced similarity measures.
         
@@ -2083,7 +2083,7 @@ class AgentContext:
             top_k: Number of similar entities to return
             
         Returns:
-            List of (entity_id, similarity_score) tuples
+            List of dicts with entity ID, content, type, and similarity score
         """
         if not self._graph_builder:
             return []

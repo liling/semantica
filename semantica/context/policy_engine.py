@@ -601,7 +601,7 @@ class PolicyEngine:
             to_version: New version
             
         Returns:
-            List of affected decision IDs
+            List of affected decisions with readable metadata
         """
         try:
             if self._supports_cypher:
@@ -610,16 +610,23 @@ class PolicyEngine:
                     policy_id: $policy_id,
                     version: $from_version
                 })
-                RETURN d.decision_id as decision_id
+                RETURN d.decision_id as decision_id,
+                       d.scenario as scenario,
+                       d.category as category,
+                       d.outcome as outcome,
+                       d.confidence as confidence
                 """
-                results = self.graph_store.execute_query(query, {
+                results = self._extract_records(self.graph_store.execute_query(query, {
                     "policy_id": policy_id,
                     "from_version": from_version
-                })
-            
-                decisions = []
-                for record in results:
-                    decisions.append(record if isinstance(record, dict) else {"decision_id": record})
+                }))
+
+                decisions = [
+                    self._enrich_affected_decision(
+                        record if isinstance(record, dict) else {"decision_id": record}
+                    )
+                    for record in results
+                ]
 
                 self.logger.info(f"Found {len(decisions)} decisions affected by policy change")
                 return decisions
@@ -627,15 +634,79 @@ class PolicyEngine:
             if not hasattr(self.graph_store, "find_edges"):
                 return []
             policy_node_id = f"{policy_id}:{from_version}"
-            decision_ids: List[str] = []
+            decisions: List[Dict[str, Any]] = []
             for edge in self.graph_store.find_edges(edge_type="APPLIED_POLICY"):
                 if edge.get("target") == policy_node_id:
-                    decision_ids.append(edge.get("source"))
-            return decision_ids
+                    decisions.append(
+                        self._enrich_affected_decision(
+                            {"decision_id": edge.get("source")}
+                        )
+                    )
+            return decisions
             
         except Exception as e:
             self.logger.exception("Failed to get affected decisions")
             raise
+
+    def _enrich_affected_decision(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize an affected decision record with readable fields."""
+        decision_id = record.get("decision_id") or record.get("source") or ""
+        node_record = self._get_decision_node_record(decision_id)
+
+        enriched = {
+            "decision_id": decision_id,
+            "scenario": record.get("scenario", node_record.get("scenario", "")),
+            "category": record.get("category", node_record.get("category", "")),
+            "outcome": record.get("outcome", node_record.get("outcome", "")),
+            "confidence": record.get("confidence", node_record.get("confidence", 0.0)),
+        }
+
+        for key, value in record.items():
+            if key not in enriched:
+                enriched[key] = value
+
+        return enriched
+
+    def _get_decision_node_record(self, decision_id: str) -> Dict[str, Any]:
+        """Best-effort lookup of a decision node from the backing graph store."""
+        if not decision_id:
+            return {}
+
+        if hasattr(self.graph_store, "nodes"):
+            nodes = getattr(self.graph_store, "nodes", {})
+            if isinstance(nodes, dict):
+                node = nodes.get(decision_id)
+                if node:
+                    properties = getattr(node, "properties", {}) or {}
+                    content = getattr(node, "content", "") or ""
+                    return {
+                        "scenario": properties.get("scenario", content),
+                        "category": properties.get("category", ""),
+                        "outcome": properties.get("outcome", ""),
+                        "confidence": properties.get("confidence", 0.0),
+                    }
+
+        get_node = getattr(self.graph_store, "get_node", None)
+        if callable(get_node):
+            try:
+                node = get_node(decision_id)
+            except Exception:
+                return {}
+
+            if isinstance(node, dict):
+                properties = node.get("properties", {}) or {}
+                return {
+                    "scenario": (
+                        properties.get("scenario")
+                        or node.get("content")
+                        or node.get("scenario", "")
+                    ),
+                    "category": properties.get("category", node.get("category", "")),
+                    "outcome": properties.get("outcome", node.get("outcome", "")),
+                    "confidence": properties.get("confidence", node.get("confidence", 0.0)),
+                }
+
+        return {}
     
     def analyze_policy_impact(
         self,

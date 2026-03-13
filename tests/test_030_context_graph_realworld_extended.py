@@ -346,9 +346,9 @@ class TestContextGraphAdvancedDecisionMethods:
         g, ids = self._build_loan_graph()
         result = g.analyze_decision_influence(ids["alice"])
         # alice, bob, and carol all share underwriter_ai_v5 — they should appear in influence
-        direct = set(result["direct_influence"])
+        direct = result["direct_influence"]
         # At minimum the category-shared decisions should appear
-        assert isinstance(direct, set)
+        assert isinstance(direct, list)
         assert result["total_influenced"] >= 0  # May be 0 if no category overlap
 
     def test_analyze_decision_influence_category_cross(self):
@@ -356,7 +356,8 @@ class TestContextGraphAdvancedDecisionMethods:
         g, ids = self._build_loan_graph()
         result = g.analyze_decision_influence(ids["bob"])
         # alice and bob are both "mortgage" category — alice should appear in influence
-        assert ids["alice"] in result["direct_influence"] or result["total_influenced"] >= 0
+        direct_ids = [d["decision_id"] for d in result["direct_influence"]]
+        assert ids["alice"] in direct_ids or result["total_influenced"] >= 0
 
     def test_analyze_decision_influence_nonexistent_raises(self):
         g, _ = self._build_loan_graph()
@@ -2019,8 +2020,8 @@ class TestContextGraphFindSimilarNodes:
         similar = g.find_similar_nodes("repo_pytorch", similarity_type="structural", top_k=5)
         assert isinstance(similar, list)
         for item in similar:
-            node_id, score = item
-            assert 0.0 <= score <= 1.0
+            assert isinstance(item, dict)
+            assert 0.0 <= item["score"] <= 1.0
 
     def test_similar_nodes_nonexistent_returns_empty(self):
         g = _build_research_graph()

@@ -398,7 +398,11 @@ class LinkPredictor:
             if hasattr(graph_store, 'get_nodes_by_label') and callable(graph_store.get_nodes_by_label):
                 result = graph_store.get_nodes_by_label(label)
                 if isinstance(result, list):
-                    nodes.extend(result)
+                    nodes.extend(
+                        item.get("id") if isinstance(item, dict) else item
+                        for item in result
+                        if item and (not isinstance(item, dict) or item.get("id"))
+                    )
             else:
                 # Fallback - get all nodes and filter by label if possible
                 all_nodes = self._get_all_nodes(graph_store)
@@ -500,7 +504,7 @@ class LinkPredictor:
                 return neighbors
         if hasattr(graph_store, 'neighbors') and callable(graph_store.neighbors):
             try:
-                raw = list(graph_store.neighbors(node_id))
+                raw = [n.get("id") if isinstance(n, dict) else n for n in graph_store.neighbors(node_id)]
                 if not isinstance(raw, list):
                     return []
                 if relationship_types and hasattr(graph_store, 'get_edge_data') and callable(graph_store.get_edge_data):

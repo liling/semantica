@@ -757,7 +757,8 @@ class CentralityCalculator:
     ) -> List[str]:
         """Get neighbors filtered by relationship types."""
         if hasattr(graph, 'neighbors'):
-            neighbors = list(graph.neighbors(node))
+            _raw = list(graph.neighbors(node))
+            neighbors = [n.get("id") if isinstance(n, dict) else n for n in _raw]
         elif hasattr(graph, 'get_neighbors'):
             neighbors = graph.get_neighbors(node)
             if neighbors and isinstance(neighbors[0], dict):

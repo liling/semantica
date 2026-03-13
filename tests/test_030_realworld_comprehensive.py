@@ -421,9 +421,13 @@ class TestContextGraphKGAnalytics:
         g = _build_tech_graph()
         similar = g.find_similar_nodes("apple", similarity_type="structural", top_k=5)
         assert isinstance(similar, list)
-        for node_id, score in similar:
-            assert isinstance(score, float)
-            assert 0.0 <= score <= 1.0
+        for item in similar:
+            assert isinstance(item, dict)
+            assert isinstance(item.get("id"), str)
+            assert isinstance(item.get("content"), str)
+            assert isinstance(item.get("type"), str)
+            assert isinstance(item.get("score"), float)
+            assert 0.0 <= item["score"] <= 1.0
 
     def test_find_similar_nodes_missing_node_returns_empty(self):
         g = _build_tech_graph()

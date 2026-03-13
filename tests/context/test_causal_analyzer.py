@@ -217,7 +217,13 @@ class TestCausalChainAnalyzer:
         mock_graph_store.execute_query.return_value = [
             {
                 "decision_id": "decision_001",
-                "loop_path": ["decision_001", "decision_002", "decision_003", "decision_001"],
+                "decision_scenario": "Approve LATAM expansion",
+                "loop_path": [
+                    {"decision_id": "decision_001", "scenario": "Approve LATAM expansion", "category": "strategy"},
+                    {"decision_id": "decision_002", "scenario": "Fund regional hiring", "category": "finance"},
+                    {"decision_id": "decision_003", "scenario": "Open Sao Paulo office", "category": "operations"},
+                    {"decision_id": "decision_001", "scenario": "Approve LATAM expansion", "category": "strategy"},
+                ],
                 "loop_length": 3,
                 "cycle_strength": 0.7
             }
@@ -227,6 +233,8 @@ class TestCausalChainAnalyzer:
         
         assert len(loops) == 1
         assert loops[0]["decision_id"] == "decision_001"
+        assert loops[0]["decision_scenario"] == "Approve LATAM expansion"
+        assert loops[0]["loop_path"][0]["scenario"] == "Approve LATAM expansion"
         assert len(loops[0]["loop_path"]) == 4  # Including return to start
         assert loops[0]["loop_length"] == 3
     

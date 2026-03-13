@@ -2023,7 +2023,11 @@ Answer:"""
                         elif hasattr(self.knowledge_graph, "get_neighbor_ids"):
                             return list(self.knowledge_graph.get_neighbor_ids(node))
                         elif hasattr(self.knowledge_graph, "neighbors"):
-                            return list(self.knowledge_graph.neighbors(node))
+                            return [
+                                n.get("id") if isinstance(n, dict) else n
+                                for n in self.knowledge_graph.neighbors(node)
+                                if n
+                            ]
                         return []
 
                     visited: set = {entity_name}
@@ -2111,7 +2115,11 @@ Answer:"""
                                 # Simplified centrality calculation
                                 if hasattr(self.knowledge_graph, 'get_neighbors'):
                                     if hasattr(self.knowledge_graph, "neighbors"):
-                                        neighbor_ids = list(self.knowledge_graph.neighbors(entity_name))
+                                        neighbor_ids = [
+                                            n.get("id") if isinstance(n, dict) else n
+                                            for n in self.knowledge_graph.neighbors(entity_name)
+                                            if n
+                                        ]
                                     elif hasattr(self.knowledge_graph, "get_neighbor_ids"):
                                         neighbor_ids = self.knowledge_graph.get_neighbor_ids(entity_name)
                                     else:
@@ -2162,8 +2170,13 @@ Answer:"""
                 if hasattr(self.knowledge_graph, 'get_nodes_by_label'):
                     policy_nodes = self.knowledge_graph.get_nodes_by_label("Policy")
                     for policy in policy_nodes[:5]:  # Limit results
+                        policy_name = (
+                            policy.get("content")
+                            or policy.get("metadata", {}).get("name", "")
+                            or policy.get("id", "")
+                        ) if isinstance(policy, dict) else policy
                         policies.append({
-                            "name": policy,
+                            "name": policy_name,
                             "type": "policy",
                             "source": "policy_search",
                             "related_category": category
@@ -2482,17 +2495,20 @@ Answer:"""
                 decision_nodes = self.knowledge_graph.get_nodes_by_label("Decision")
                 
                 for node_data in decision_nodes[:limit]:
+                    metadata = {}
+                    if isinstance(node_data, dict):
+                        metadata = node_data.get("metadata") or node_data.get("properties") or {}
                     # Convert to Decision object
                     decision = Decision(
-                        decision_id=node_data.get("id", ""),
-                        category=node_data.get("properties", {}).get("category", ""),
-                        scenario=node_data.get("content", ""),
-                        reasoning=node_data.get("properties", {}).get("reasoning", ""),
-                        outcome=node_data.get("properties", {}).get("outcome", ""),
-                        confidence=node_data.get("properties", {}).get("confidence", 0.0),
+                        decision_id=node_data.get("id", "") if isinstance(node_data, dict) else "",
+                        category=metadata.get("category", ""),
+                        scenario=node_data.get("content", "") if isinstance(node_data, dict) else "",
+                        reasoning=metadata.get("reasoning", ""),
+                        outcome=metadata.get("outcome", ""),
+                        confidence=metadata.get("confidence", 0.0),
                         timestamp=datetime.now(),
-                        decision_maker=node_data.get("properties", {}).get("decision_maker", ""),
-                        metadata=node_data.get("properties", {})
+                        decision_maker=metadata.get("decision_maker", ""),
+                        metadata=metadata
                     )
                     
                     # Filter by category if specified

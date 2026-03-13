@@ -460,6 +460,10 @@ class TestPolicyEngine:
         assert len(affected_decisions) == 2
         assert affected_decisions[0]["decision_id"] == "decision_001"
         assert affected_decisions[0]["applied_policy_version"] == from_version
+        assert "scenario" in affected_decisions[0]
+        assert "category" in affected_decisions[0]
+        assert "outcome" in affected_decisions[0]
+        assert "confidence" in affected_decisions[0]
     
     def test_analyze_policy_impact_success(self, policy_engine, mock_graph_store):
         """Test policy impact analysis."""

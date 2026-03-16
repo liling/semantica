@@ -366,7 +366,7 @@ class EntityLinker:
         entity_text: str,
         entity_type: Optional[str] = None,
         threshold: Optional[float] = None,
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Dict[str, Any]]:
         """
         Find similar entities in knowledge graph.
 
@@ -376,7 +376,7 @@ class EntityLinker:
             threshold: Similarity threshold (uses default if None)
 
         Returns:
-            List of (entity_id, similarity_score) tuples
+            List of dicts with entity_id, text, type, uri, and similarity
         """
         threshold = threshold or self.similarity_threshold
 
@@ -404,10 +404,16 @@ class EntityLinker:
             if similarity >= threshold:
                 entity_id = entity.get("id") or entity.get("entity_id")
                 if entity_id:
-                    similar_entities.append((entity_id, similarity))
+                    similar_entities.append({
+                        "entity_id": entity_id,
+                        "text": entity_text2,
+                        "type": entity.get("type", ""),
+                        "uri": self.entity_registry.get(entity_id, ""),
+                        "similarity": similarity,
+                    })
 
         # Sort by similarity
-        similar_entities.sort(key=lambda x: x[1], reverse=True)
+        similar_entities.sort(key=lambda x: x["similarity"], reverse=True)
 
         return similar_entities
 
@@ -425,7 +431,11 @@ class EntityLinker:
         # Find similar entities in knowledge graph
         if self.knowledge_graph:
             similar = self.find_similar_entities(entity_text, entity_type)
-            for similar_id, similarity in similar:
+            for similar_entity in similar:
+                similar_id = similar_entity.get("entity_id")
+                similarity = similar_entity.get("similarity", 0.0)
+                if not similar_id:
+                    continue
                 if similar_id != entity_id:
                     links.append(
                         EntityLink(
@@ -578,7 +588,11 @@ class EntityLinker:
             )
 
             linked_entities = []
-            for similar_id, similarity in similar:
+            for similar_entity in similar:
+                similar_id = similar_entity.get("entity_id")
+                similarity = similar_entity.get("similarity", 0.0)
+                if not similar_id:
+                    continue
                 linked_entities.append(
                     EntityLink(
                         source_entity_id=entity.get("id", ""),
@@ -604,7 +618,7 @@ class EntityLinker:
     # Search Methods
     def find_similar(
         self, entity: Union[str, EntityDict], threshold: float = 0.8
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Dict[str, Any]]:
         """
         Find similar entities.
 
@@ -613,7 +627,7 @@ class EntityLinker:
             threshold: Similarity threshold (default: 0.8)
 
         Returns:
-            List of (entity_id, similarity) tuples
+            List of dicts with entity_id, text, type, uri, and similarity
 
         Example:
             >>> similar = linker.find_similar("Python", threshold=0.8)

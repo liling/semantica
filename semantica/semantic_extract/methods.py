@@ -1973,8 +1973,8 @@ Entities found in text: {entities_str}"""
             parsed = result_obj
 
         # Use common parser to build internal Relation objects
-        relations = _parse_relation_result(parsed, original_entities, text, provider, model)
-        
+        relations = _parse_relation_result(parsed, original_entities, text, provider, model, extraction_method="llm_typed")
+
         # If typed path returned no relations, attempt a structured JSON fallback
         if not relations:
             try:
@@ -1982,7 +1982,7 @@ Entities found in text: {entities_str}"""
                     import sys
                     print("    [methods.extract_relations_llm] Typed result empty, attempting structured JSON fallback...", flush=True, file=sys.stdout)
                 raw_json = llm.generate_structured(prompt, **call_kwargs)
-                relations = _parse_relation_result(raw_json, original_entities, text, provider, model)
+                relations = _parse_relation_result(raw_json, original_entities, text, provider, model, extraction_method="llm_typed")
             except Exception as _e:
                 # Keep relations as empty if fallback fails
                 pass
@@ -2019,11 +2019,12 @@ Entities found in text: {entities_str}"""
 
 
 def _parse_relation_result(
-    result: Any, 
-    entities: List[Entity], 
+    result: Any,
+    entities: List[Entity],
     text: str,
-    provider: str, 
-    model: Optional[str]
+    provider: str,
+    model: Optional[str],
+    extraction_method: str = "llm",
 ) -> List[Relation]:
     """Helper to parse raw LLM result into Relation objects."""
     relations = []
@@ -2081,29 +2082,10 @@ def _parse_relation_result(
                 metadata={
                     "provider": provider,
                     "model": model,
-                    "extraction_method": "llm",
+                    "extraction_method": extraction_method,
                 },
             )
         )
-        # Find matching entities using hybrid similarity
-        subject_entity = match_entity(subject_text, entities)
-        object_entity = match_entity(object_text, entities)
-
-        if subject_entity and object_entity:
-            relations.append(
-                Relation(
-                    subject=subject_entity,
-                    predicate=item.get("predicate", "related_to"),
-                    object=object_entity,
-                    confidence=item.get("confidence", 0.9),
-                    context=text,
-                    metadata={
-                        "provider": provider,
-                        "model": model,
-                        "extraction_method": "llm",
-                    },
-                )
-            )
     return relations
 
 

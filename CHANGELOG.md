@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Ontology Alignment API** (PR #361 by @ZohaibHassan16, review & fixes by @KaifAhmad1):
+  - Alignment representation using standard RDF predicates: `owl:equivalentClass`, `owl:equivalentProperty`, `owl:sameAs`, `skos:exactMatch`, `skos:closeMatch`, `skos:broadMatch`, `skos:narrowMatch`, `skos:relatedMatch`
+  - `OntologyEngine.create_alignment(source_uri, target_uri, predicate)` — store alignment triples in TripletStore
+  - `OntologyEngine.get_alignments(entity_uri)` — bidirectional retrieval of all alignments for an entity
+  - `OntologyEngine.list_alignments(ontology_uri=None)` — list all alignments, optionally filtered by ontology namespace
+  - `NamespaceManager.get_alignment_predicates()` — expose standard OWL/SKOS alignment URIs as a convenience dict
+  - `ReuseManager.suggest_alignments(target, source)` — O(N+M) hashmap heuristic to suggest alignments based on exact label matches across ontologies
+  - `ReuseManager.merge_ontology_data(..., compute_alignments=True)` — optionally attach suggested alignments to merge output without auto-committing unverified triples
+  - `QueryEngine.expand_entity_uri(uri, store, use_alignments=True)` — bidirectional SPARQL expansion to include aligned equivalents; no-ops when flag is False
+  - `QueryEngine.build_values_clause(variable, uris)` — generate a SPARQL `VALUES` clause for injecting expanded URIs into queries
+  - Alignment-aware queries section added to `docs/reference/triplet_store.md`
+  - Ontology Alignment section added to `docs/reference/ontology.md`
+  - **Fixes applied post-review (by @KaifAhmad1)**:
+    - Fixed progress tracker leak in `expand_entity_uri` — `stop_tracking` was only called inside the `hasattr(execute_sparql)` branch; backends without it silently leaked a tracker entry
+    - Fixed `relatedMatch` predicate gap — `get_alignment_predicates()` exposed `skos:relatedMatch` but all three SPARQL FILTER lists omitted it, making those alignments permanently invisible
+    - Fixed SPARQL injection in `list_alignments` — previously only `"` was escaped; `\`, `{`, and `}` are now also percent-encoded to prevent WHERE block breakout
+    - Fixed SPARQL injection in `build_values_clause` — URIs now run through `_sanitize_uri` before wrapping in angle-bracket literals
+    - Added full-URI validation in `create_alignment` — raises `ProcessingError` if predicate is a CURIE instead of a full URI, preventing silent storage of unqueryable triples
+    - Fixed E2E test `test_end_to_end_cross_ontology_uri_flow` — previously mocked the method under test; now uses a real mock backend with `execute_sparql` to exercise the actual expansion and VALUES clause injection flow
+  - 19 tests added covering: `create_alignment`, `get_alignments`, `suggest_alignments`, merge with alignment computation, `expand_entity_uri` (enabled/disabled), `build_values_clause`, and full E2E cross-ontology query flow
+- **Context Explainability Output Fixes** (PR pending on `context` by @KaifAhmad1):
+  - Fixed decision-node storage in `ContextGraph` so full human-readable `scenario`, `reasoning`, and decision metadata are preserved on graph nodes instead of degrading into opaque IDs or truncated display text
+  - Fixed causal and precedent reconstruction paths in the context module so returned `Decision` objects prefer readable stored fields over raw node identifiers
+  - Fixed context aggregate outputs to return enriched readable payloads for influence, causality, similarity, policy-impact, and entity-similarity workflows instead of bare UUID lists or tuple-only results
+  - Fixed `PolicyEngine.get_affected_decisions()` so both Cypher and fallback branches return consistent decision metadata including `scenario`, `category`, `outcome`, and `confidence`
+  - Fixed `EntityLinker` similarity flows so enriched similarity results are consumed correctly across internal linking paths and public search aliases
+  - Fixed downstream KG integrations in `node_embeddings`, `link_predictor`, `centrality_calculator`, `path_finder`, and context retrieval fallbacks to normalize enriched neighbor/node outputs without breaking graph algorithms
+  - Added and updated regression tests covering readable decision text preservation, enriched causal/path outputs, policy-impact results, entity similarity payloads, and compatibility with KG consumers
+
+## [0.3.0] - 2026-03-10
+
+- **Context Graph Feature Completeness** (by @KaifAhmad1):
+  - Added `valid_from` / `valid_until` temporal validity fields to `ContextNode` and `ContextEdge` dataclasses — both expose `is_active(at_time=None) -> bool`; nodes/edges without these fields are always considered active
+  - Added `add_node(valid_from=..., valid_until=...)` and `add_edge(valid_from=..., valid_until=...)` support — validity windows are extracted from `**properties` and stored as first-class dataclass fields, not in metadata
+  - Added `ContextGraph.find_active_nodes(node_type=None, at_time=None)` — returns only nodes whose validity window includes the given time (defaults to `datetime.utcnow()`); complements `find_nodes()` with temporal filtering
+  - Added `min_weight: float = 0.0` parameter to `ContextGraph.get_neighbors()` — edges with weight below the threshold are skipped during BFS traversal, enabling weighted/confidence-filtered multi-hop navigation; fully backward-compatible (default 0.0 passes all edges)
+  - Added `ContextGraph.link_graph(other_graph, source_node_id, target_node_id, link_type="CROSS_GRAPH") -> str` — creates a navigable bridge between two separate `ContextGraph` instances; records a marker edge internally and returns a `link_id`
+  - Added `ContextGraph.navigate_to(link_id) -> (other_graph, target_node_id)` — resolves a `link_id` to the target graph and its entry node, enabling hierarchical cross-graph traversal (e.g. agent moving from a high-level decision graph into a domain-specific sub-graph)
+  - Added `ContextGraph.resolve_links(registry)` — reconnects cross-graph links after `load_from_file()`; `save_to_file()` now persists a `links` section with `other_graph_id` so navigation survives the full save/load cycle
+  - Added `graph_id` field to `ContextGraph` — stable UUID per instance, persisted to JSON, so separate graphs can identify each other after reload
+  - Fixed `is_active()` on `ContextNode` and `ContextEdge` — tz-aware `datetime` inputs are now normalised to tz-naive UTC before comparison, preventing `TypeError` when callers pass `datetime.now(timezone.utc)`
+  - Fixed `valid_from` / `valid_until` serialisation — `add_nodes()`, `add_edges()`, `to_dict()`, and `from_dict()` all now preserve and restore validity windows; previously these fields were silently lost
+  - Fixed cross-graph link artifact — `link_graph()` now pre-creates a `"cross_graph_link"` typed `ContextNode` for the marker before inserting the marker edge, preventing `_add_internal_edge()` from auto-creating a phantom `"entity"` node
+  - Added 14 tests in `tests/context/test_cross_graph_navigation.py` covering link creation, phantom-node prevention, and full save/load round-trips with `resolve_links()`
+  - Fixed `pipeline_builder.add_step()` return type annotation from `"PipelineBuilder"` to `"PipelineStep"` — implementation was already correct per 0.3.0-beta changelog, only signature and docstring were stale
+  - Fixed `test_hybrid_search_performance` timing computation — accumulated a real `search_times` list and compute true average; raised threshold to `< 5.0s` to account for real `sentence-transformers` (384-dim) latency
+
+
+
+- **0.3.0 Bug Fixes & Comprehensive Real-World Tests** (by @KaifAhmad1):
+  - Fixed `ProvenanceTracker` missing from `semantica/kg/__init__.py` exports — `from semantica.kg import ProvenanceTracker` now works correctly
+  - Fixed duplicate relation creation in `_parse_relation_result` — orphaned legacy block was appending every relation twice; removed the duplicate block
+  - Added `extraction_method` parameter to `_parse_relation_result`; typed extraction path now correctly sets `"llm_typed"` instead of `"llm"` in relation metadata
+  - Fixed cross-test cache pollution in `tests/semantic_extract/test_retry_logic.py` — module-level `_result_cache` now cleared in `setUp()` to prevent intermittent failures when tests share input text
+  - Added `tests/test_030_realworld_comprehensive.py`: 85 real-world tests covering all 0.3.0-alpha/beta features with real data (tech companies, CEOs, products, investment chains, healthcare scenarios)
+    - ContextGraph basic operations and decision tracking lifecycle
+    - KG algorithms: centrality, community detection, embeddings, path finding, similarity, link prediction, connectivity
+    - PolicyEngine, DecisionQuery, AgentContext, Decision model serialization
+    - ProvenanceTracker with GraphBuilderWithProvenance and AlgorithmTrackerWithProvenance
+    - Deduplication v2 with blocking strategies, RDF/TTL export, Reasoner inference
+    - Pipeline builder/validator/failure handler with retry policies
+    - Multi-hop investment chain (Microsoft→OpenAI, Google→Anthropic) end-to-end
+    - Healthcare entity extraction and knowledge graph construction E2E
+
+## [0.3.0-beta] - 2026-03-07
 
 - **Multi-Founder LLM Extraction & Reasoner Inference Fix** (PR #354 by @KaifAhmad1):
   - Fixed `_parse_relation_result` in `methods.py` — unmatched subjects/objects now produce a synthetic `UNKNOWN` entity instead of silently dropping the relation; all LLM-returned co-founders are preserved

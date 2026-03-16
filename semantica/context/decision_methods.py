@@ -623,13 +623,22 @@ def analyze_decision_impact(
         # Get root causes
         root_causes = analyzer.find_root_causes(decision_id, max_depth=5)
         
+        def _decision_dict(d) -> Dict[str, Any]:
+            return {
+                "decision_id": d.decision_id,
+                "scenario": d.scenario,
+                "category": d.category,
+                "outcome": d.outcome,
+                "confidence": d.confidence,
+            }
+
         return {
             "decision_id": decision_id,
             "impact_score": impact_score,
-            "influenced_decisions": len(influenced),
-            "root_causes": len(root_causes),
-            "influenced_decision_ids": [d.decision_id for d in influenced],
-            "root_cause_ids": [d.decision_id for d in root_causes],
+            "influenced_decisions": [_decision_dict(d) for d in influenced],
+            "root_causes": [_decision_dict(d) for d in root_causes],
+            "total_influenced": len(influenced),
+            "total_root_causes": len(root_causes),
             "analysis_timestamp": datetime.now().isoformat()
         }
         

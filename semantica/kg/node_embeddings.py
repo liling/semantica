@@ -356,7 +356,13 @@ class NodeEmbedder:
         nodes = []
         if hasattr(graph_store, 'get_nodes_by_label'):
             for label in node_labels:
-                nodes.extend(graph_store.get_nodes_by_label(label))
+                for node in graph_store.get_nodes_by_label(label):
+                    if isinstance(node, dict):
+                        node_id = node.get("id")
+                        if node_id:
+                            nodes.append(node_id)
+                    elif node:
+                        nodes.append(node)
         else:
             # Fallback for different graph store implementations
             nodes = list(graph_store.nodes())
@@ -365,7 +371,14 @@ class NodeEmbedder:
         for node in nodes:
             if hasattr(graph_store, 'get_neighbors'):
                 try:
-                    neighbor_details = graph_store.get_neighbors(node, relationship_types)
+                    try:
+                        neighbor_details = graph_store.get_neighbors(
+                            node,
+                            relationship_types=relationship_types,
+                        )
+                    except TypeError:
+                        neighbor_details = graph_store.get_neighbors(node, relationship_types)
+
                     if isinstance(neighbor_details, list):
                         adjacency[node] = [
                             n.get("id") if isinstance(n, dict) else n
@@ -380,7 +393,11 @@ class NodeEmbedder:
                 adjacency[node] = list(graph_store.get_neighbor_ids(node, relationship_types))
             elif hasattr(graph_store, 'neighbors'):
                 try:
-                    adjacency[node] = list(graph_store.neighbors(node))
+                    adjacency[node] = [
+                        n.get("id") if isinstance(n, dict) else n
+                        for n in graph_store.neighbors(node)
+                        if n
+                    ]
                 except TypeError:
                     adjacency[node] = []
             else:

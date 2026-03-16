@@ -117,6 +117,7 @@ from .link_predictor import LinkPredictor
 from .node_embeddings import NodeEmbedder
 from .path_finder import PathFinder
 from .kg_provenance import GraphBuilderWithProvenance, AlgorithmTrackerWithProvenance
+from .provenance_tracker import ProvenanceTracker
 from .registry import MethodRegistry, method_registry, AlgorithmRegistry, algorithm_registry
 from .seed_manager import SeedManager
 from .similarity_calculator import SimilarityCalculator
@@ -137,6 +138,7 @@ __all__ = [
     "TemporalPatternDetector",
     "TemporalVersionManager",
     "AlgorithmTrackerWithProvenance",
+    "ProvenanceTracker",
     # Enhanced Graph Algorithms
     "NodeEmbedder",
     "SimilarityCalculator",

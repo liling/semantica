@@ -37,11 +37,14 @@ class EntitiesResponse(BaseModel):
     entities: List[dict]
 
 class TestRetryLogic(unittest.TestCase):
-    
+
     def setUp(self):
         self.mock_provider = MagicMock()
         self.mock_provider.is_available.return_value = True
         self.mock_provider.generate_typed.return_value = MagicMock(entities=[])
+        # Clear the module-level extraction cache to avoid cross-test interference
+        from semantica.semantic_extract.methods import _result_cache
+        _result_cache.clear()
         
     def test_ner_extractor_init_default(self):
         """Test default max_retries in NERExtractor"""

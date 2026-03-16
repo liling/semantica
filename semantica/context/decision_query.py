@@ -573,20 +573,23 @@ class DecisionQuery:
             query = f"""
             MATCH (d:Decision {{decision_id: $decision_id}})
             MATCH path = (d)-[:{rel_filter}*]-(related)
-            RETURN path, length(path) as path_length
+            RETURN [node in nodes(path) | {{decision_id: node.decision_id, scenario: node.scenario, category: node.category}}] as path_nodes,
+                   [r in relationships(path) | {{from: startNode(r).decision_id, to: endNode(r).decision_id, type: type(r)}}] as path_rels,
+                   length(path) as path_length
             ORDER BY path_length
             """
-            
+
             results = self.graph_store.execute_query(query, {
                 "decision_id": decision_id
             })
             results = self._extract_records(results)
-            
+
             paths = []
             for record in results:
                 path_info = {
-                    "path": record.get("path"),
-                    "path_length": record.get("path_length", 0)
+                    "path_length": record.get("path_length", 0),
+                    "nodes": record.get("path_nodes", []),
+                    "relationships": record.get("path_rels", []),
                 }
                 paths.append(path_info)
             

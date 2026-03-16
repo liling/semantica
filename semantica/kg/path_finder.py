@@ -569,7 +569,8 @@ class PathFinder:
         neighbors = []
         
         if hasattr(graph, 'neighbors'):
-            for neighbor in graph.neighbors(node):
+            for _raw in graph.neighbors(node):
+                neighbor = _raw.get("id") if isinstance(_raw, dict) else _raw
                 edge_data = self._get_edge_data(graph, node, neighbor)
                 neighbors.append((neighbor, edge_data))
         elif hasattr(graph, 'get_neighbors'):

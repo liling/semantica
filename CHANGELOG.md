@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Ontology Diff & Migration** (PR #367 by @ZohaibHassan16, review & fixes by @KaifAhmad1):
+  - `VersionManager.diff_ontologies(base, target)` — structured diff between two ontology dicts using hash-map lookups; handles URI-less items via `name` fallback; deep equality checks for unordered lists; now covers classes, properties, individuals, and axioms
+  - `ChangeLogAnalyzer.analyze(diff)` — classifies each change by semantic impact: removed classes/properties → `CRITICAL/BREAKING`; narrowed domain/range/cardinality → `HIGH/BREAKING`; hierarchy modifications → `MEDIUM/POTENTIALLY_BREAKING`; added elements and annotation updates → `INFO/NON_BREAKING`
+  - `ImpactReport` dataclass and `generate_change_report(diff)` public helper — returns a structured dict with `summary`, `impact_classification` (breaking / potentially_breaking / safe), `recommendations`, and the raw `diff`
+  - `OntologyEngine.compare_versions(base_id, target_id, **options)` — end-to-end orchestrator: loads versions from `VersionManager`, runs `diff_ontologies`, generates impact report; accepts `base_dict`/`target_dict` overrides to bypass version store; `run_validation=True` triggers `OntologyValidator` on the target schema; `graph_data=...` additionally runs `GraphValidator` on instance data against the new schema
+  - `OntologyEngine.get_ontology_version_dict(version_id)` — utility to load a registered version as a plain dict ready for diffing
+  - Documentation added to `docs/reference/change_management.md`: "Ontology Diff & Migration" section with code example and full report format reference
+  - 7 tests added to `tests/change_management/test_managers.py` covering: empty diff, unordered list equality, URI/name fallback, breaking class removal, narrowed domain (HIGH), safe additions and annotation changes, `compare_versions` dict override, version-not-found error path, individuals/axioms diff coverage, null constraint value flagged as breaking
+  - **Fixes applied post-review (by @KaifAhmad1)**:
+    - Fixed typo in `ChangeCategory` enum value: `"potenitally_breaking"` → `"potentially_breaking"`
+    - Fixed missing space in impact description string: `f"New{entity_type}"` → `f"New {entity_type}"`
+    - Added null-value guard in `_analyze_field_changes` — constraint fields with `None` old/new value are now correctly flagged as breaking instead of silently passing the subset check
+    - Made `ChangeLogAnalyzer` stateless — `report` is now a local variable passed into `_generate_recommendations(report)` rather than stored as `self.report`; removes re-entrancy hazard
+    - Removed no-op `__init__` from `ChangeLogAnalyzer`
+    - Replaced non-portable emoji markers in recommendations (`✘✘✘`, `¤¤¤`, `☺☺☺`) with plain-text tags (`[BREAKING]`, `[WARNING]`, `[SAFE]`)
+    - Extended `diff_ontologies` to cover `individuals` and `axioms` — previously only classes and properties were diffed; the public `compare_versions` path now returns all four element types
+    - Fixed exception chaining in `compare_versions`: `raise ProcessingError(...) from e` to preserve original traceback
+    - Removed silent `ImportError` swallow for `GraphValidator` — it is a first-party module; an `ImportError` indicates a broken install, not a graceful skip
+    - Added comment on deferred `VersionManager` import in `OntologyEngine.__init__` explaining the circular-import constraint
+    - Fixed import-before-docstring in `tests/change_management/test_managers.py`
+    - Fixed broken Markdown link syntax in docs JSON example block: `"[http://...](http://...)"` → bare URI string
+    - Updated docs recommendations example to match the new plain-text tag format
+
 - **Ontology Alignment API** (PR #361 by @ZohaibHassan16, review & fixes by @KaifAhmad1):
   - Alignment representation using standard RDF predicates: `owl:equivalentClass`, `owl:equivalentProperty`, `owl:sameAs`, `skos:exactMatch`, `skos:closeMatch`, `skos:broadMatch`, `skos:narrowMatch`, `skos:relatedMatch`
   - `OntologyEngine.create_alignment(source_uri, target_uri, predicate)` — store alignment triples in TripletStore

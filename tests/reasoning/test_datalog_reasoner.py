@@ -6,7 +6,6 @@ import pytest
 from typing import List, Dict, Any
 
 from semantica.reasoning.datalog_reasoner import DatalogReasoner, DatalogFact
-----------------------------------------------------------------
 
 @pytest.fixture
 def reasoner():
@@ -135,12 +134,41 @@ class TestContextGraphIntegration:
             nodes=[{"id": "microsoft", "type": "company"}],
             edges=[{"source": "microsoft", "target": "openai", "type": "invested_in"}]
         )
-        
+
         added = reasoner.load_from_graph(graph)
-        assert added == 2 
-        
+        assert added == 2
+
         assert DatalogFact("company", ("microsoft",)) in reasoner._all_facts
         assert DatalogFact("invested_in", ("microsoft", "openai")) in reasoner._all_facts
+
+    def test_edge_becomes_fact(self, reasoner):
+        graph = MockContextGraph(
+            nodes=[],
+            edges=[
+                {"source": "alice", "target": "bob", "type": "manages"},
+                {"source": "bob", "target": "carol", "type": "manages"},
+            ]
+        )
+        reasoner.load_from_graph(graph)
+
+        assert DatalogFact("manages", ("alice", "bob")) in reasoner._all_facts
+        assert DatalogFact("manages", ("bob", "carol")) in reasoner._all_facts
+
+    def test_derive_after_load(self, reasoner):
+        graph = MockContextGraph(
+            nodes=[],
+            edges=[
+                {"source": "alice", "target": "bob", "type": "manages"},
+                {"source": "bob", "target": "carol", "type": "manages"},
+            ]
+        )
+        reasoner.load_from_graph(graph)
+
+        reasoner.add_rule("transitive_manages(X, Y) :- manages(X, Y).")
+        reasoner.add_rule("transitive_manages(X, Y) :- manages(X, Z), transitive_manages(Z, Y).")
+
+        derived = reasoner.derive_all()
+        assert "transitive_manages(alice, carol)" in derived
 
 
 class TestEdgeCases:

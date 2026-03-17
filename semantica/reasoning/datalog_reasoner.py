@@ -48,14 +48,13 @@ class DatalogReasoner:
         self.config.update(kwargs)
         
         self.progress_tracker = get_progress_tracker()
-        if not self.progress_tracker.enabled:
-            self.progress_tracker.enabled = True
 
         self._fact_index: Dict[str, Set[DatalogFact]] = defaultdict(set)
         self._all_facts: Set[DatalogFact] = set()
-        
+
         self._rules: List[DatalogRule] = []
-        
+        self._derived: bool = False
+
         self._delta_old: Set[DatalogFact] = set()
         self._delta_new: Set[DatalogFact] = set()
         
@@ -64,6 +63,7 @@ class DatalogReasoner:
         self._fact_index.clear()
         self._all_facts.clear()
         self._rules.clear()
+        self._derived = False
         self._delta_old.clear()
         self._delta_new.clear()
     
@@ -109,14 +109,20 @@ class DatalogReasoner:
                     if arg[0].isupper():
                         raise ValueError(f"Facts must be constants only. Found variable '{arg}' in {fact}")
         
+        if parsed_fact is None and isinstance(fact, dict):
+            self.logger.warning(f"Unrecognised dict fact format, skipping: {fact}")
+            return
+
         if parsed_fact and parsed_fact not in self._all_facts:
             self._all_facts.add(parsed_fact)
             self._fact_index[parsed_fact.predicate].add(parsed_fact)
-        
+            self._derived = False
+
     def add_rule(self, rule_str: str) -> None:
         """ Add a Datalog rule using Horn clause syntax."""
         rule = self._parse_rule_string(rule_str)
         self._rules.append(rule)
+        self._derived = False
 
     # Parsing helpers
 
@@ -238,46 +244,52 @@ class DatalogReasoner:
         Executes bottom-up semi-naive evaluation until fixpoint is reached.
         Returns a list of all derived facts as strings.
         """
+        if self._derived:
+            return [f"{f.predicate}({', '.join(f.args)})" for f in self._all_facts]
+
         tracking_id = self.progress_tracker.start_tracking(
             module="reasoning",
             submodule="DatalogReasoner",
             message="Starting semi-naive fixpoint evaluation"
         )
-        
+
         iteration = 0
         newly_derived_count = 0
-        
-        self._delta_new = self._all_facts.copy()
-        
-        while self._delta_new:
-            iteration += 1
-            
-            # Shift deltas
-            self._delta_old = self._delta_new
-            self._delta_new = set()
-            
-            delta_index = defaultdict(set)
-            for f in self._delta_old:
-                delta_index[f.predicate].add(f)
-            
-            for rule in self._rules:
-                new_facts = self._apply_rule(rule, delta_index)
-                
-                for fact in new_facts:
-                    if fact not in self._all_facts:
-                        self._delta_new.add(fact)
-                        self._all_facts.add(fact)
-                        self._fact_index[fact.predicate].add(fact)
-                        newly_derived_count += 1
-            
-            self.logger.debug(f"Datalog Iteration {iteration}: derived {len(self._delta_new)} new facts")
 
-        self.progress_tracker.stop_tracking(
-            tracking_id,
-            status="completed",
-            message=f"Fixpoint reached in {iteration} iterations. {newly_derived_count} new facts derived."
-        )
-        
+        try:
+            self._delta_new = self._all_facts.copy()
+
+            while self._delta_new:
+                iteration += 1
+
+                # Shift deltas
+                self._delta_old = self._delta_new
+                self._delta_new = set()
+
+                delta_index = defaultdict(set)
+                for f in self._delta_old:
+                    delta_index[f.predicate].add(f)
+
+                for rule in self._rules:
+                    new_facts = self._apply_rule(rule, delta_index)
+
+                    for fact in new_facts:
+                        if fact not in self._all_facts:
+                            self._delta_new.add(fact)
+                            self._all_facts.add(fact)
+                            self._fact_index[fact.predicate].add(fact)
+                            newly_derived_count += 1
+
+                self.logger.debug(f"Datalog Iteration {iteration}: derived {len(self._delta_new)} new facts")
+
+            self._derived = True
+        finally:
+            self.progress_tracker.stop_tracking(
+                tracking_id,
+                status="completed",
+                message=f"Fixpoint reached in {iteration} iterations. {newly_derived_count} new facts derived."
+            )
+
         return [f"{f.predicate}({', '.join(f.args)})" for f in self._all_facts]
 
     def _apply_rule(
@@ -335,7 +347,7 @@ class DatalogReasoner:
         Syntax: "ancestor(tom, ?Y)" or "ancestor(tom, ?y)"
         Returns: [{"Y": "bob"}] or [{"y": "bob"}]
         """
-        if self._rules:
+        if self._rules and not self._derived:
             self.derive_all()
             
         match = re.match(r'^\s*([a-zA-Z0-9_]+)\s*\(\s*([^)]+)\s*\)\s*\.?\s*$', pattern.strip())

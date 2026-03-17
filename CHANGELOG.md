@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Novita AI Provider** (PR #374 by @Alex-wuhu):
+  - Added `NovitaProvider` — OpenAI-compatible integration via `https://api.novita.ai/v1`; supports `generate()` and `generate_structured()` (JSON forced format)
+  - Default model: `deepseek/deepseek-v3.2`; configurable via `NOVITA_API_KEY` environment variable
+  - Registered `"novita"` in the built-in provider factory; usable via `create_provider("novita")`
+  - Added integration tests in `tests/test_novita_integration.py` with proper assertions and graceful skip when `NOVITA_API_KEY` is unset
+
 - **Native Datalog Reasoning Engine** (PR #371, Issue #368 by @ZohaibHassan16, reviewed and fixed by @KaifAhmad1):
   - Added `DatalogReasoner` to `semantica.reasoning` — a pure-Python, bottom-up semi-naive fixpoint engine with guaranteed termination on finite graphs
   - Supports recursive Horn clause rules (e.g. `ancestor(X,Y) :- parent(X,Z), ancestor(Z,Y).`) that existing engines loop on indefinitely

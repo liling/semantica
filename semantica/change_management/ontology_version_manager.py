@@ -295,6 +295,98 @@ class VersionManager:
                 "axioms_removed": len(axioms_removed)
             }
         }
+    
+    def diff_ontologies(self, base: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Computes a structured diff between two ontology versions.
+        """
+        def _compute_section_diff(base_list, target_list):
+    
+            base_map = {}
+            for item in base_list:
+                if isinstance(item, dict):
+                    key = item.get("uri") or item.get("name")
+                    if key:
+                        base_map[key] = item
+                elif isinstance(item, str):
+                    base_map[item] = {"uri": item}
+
+            target_map = {}
+            for item in target_list:
+                if isinstance(item, dict):
+                    key = item.get("uri") or item.get("name")
+                    if key:
+                        target_map[key] = item
+                elif isinstance(item, str):
+                    target_map[item] = {"uri": item}
+            
+            added, removed, changed = [], [], []
+            
+            # Find Added and Changed 
+            for key, t_item in target_map.items():
+                if key not in base_map:
+                    added.append(t_item)
+                else:
+                    b_item = base_map[key]
+                    changes = {}
+                    
+                    all_fields = set(b_item.keys()).union(t_item.keys())
+                    for field in all_fields:
+                        if field in ["uri", "name"]: 
+                            continue
+                        
+                        b_val = b_item.get(field)
+                        t_val = t_item.get(field)
+                        
+                        # Deep equality check for lists
+                        if isinstance(b_val, list) and isinstance(t_val, list):
+                            if set(str(x) for x in b_val) != set(str(x) for x in t_val):
+                                changes[field] = {"old": b_val, "new": t_val}
+                        elif b_val != t_val:
+                            changes[field] = {"old": b_val, "new": t_val}
+                    
+                    if changes:
+                        changed.append({
+                            "uri": t_item.get("uri") or key,
+                            "name": t_item.get("name") or key,
+                            "changes": changes
+                        })
+                        
+            # Find deleted
+            for key, b_item in base_map.items():
+                if key not in target_map:
+                    removed.append(b_item)
+                    
+            return added, removed, changed
+
+
+        classes_added, classes_removed, classes_changed = _compute_section_diff(
+            base.get("classes", []), target.get("classes", [])
+        )
+        props_added, props_removed, props_changed = _compute_section_diff(
+            base.get("properties", []), target.get("properties", [])
+        )
+        inds_added, inds_removed, inds_changed = _compute_section_diff(
+            base.get("individuals", []), target.get("individuals", [])
+        )
+        axioms_added, axioms_removed, axioms_changed = _compute_section_diff(
+            base.get("axioms", []), target.get("axioms", [])
+        )
+
+        return {
+            "added_classes": classes_added,
+            "removed_classes": classes_removed,
+            "changed_classes": classes_changed,
+            "added_properties": props_added,
+            "removed_properties": props_removed,
+            "changed_properties": props_changed,
+            "added_individuals": inds_added,
+            "removed_individuals": inds_removed,
+            "changed_individuals": inds_changed,
+            "added_axioms": axioms_added,
+            "removed_axioms": axioms_removed,
+            "changed_axioms": axioms_changed,
+        }
 
     def get_version(self, version: str) -> Optional[OntologyVersion]:
         """Get version by version string."""

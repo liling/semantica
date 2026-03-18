@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Agno Agentic Framework Integration** (Issue #249):
+  - Added `AgnoContextStore` — graph-backed agent memory implementing the `agno.memory.db.base.MemoryDb` protocol; wraps `AgentContext` + `VectorStore`; supports `create()`, `table_exists()`, `memory_exists()`, `read_memories()`, `upsert_memory()`, `delete_memory()`, `drop_table()`, `clear()` plus extended `record_decision()`, `find_precedents()`, `retrieve()` methods
+  - Added `AgnoKnowledgeGraph` — multi-hop GraphRAG knowledge base implementing `agno.knowledge.base.AgentKnowledge`; ingests files, directories, URLs, and raw text via NER → relation extraction → graph build → vector index pipeline; `search()` returns `AgnoDocument` objects; `get_graph_context(entity)` returns text summary of entity's graph neighbourhood
+  - Added `AgnoDecisionKit` — Agno `Toolkit` subclass exposing 6 decision-intelligence tools: `record_decision`, `find_precedents`, `trace_causal_chain`, `analyze_impact`, `check_policy`, `get_decision_summary`
+  - Added `AgnoKGToolkit` — Agno `Toolkit` subclass exposing 7 KG pipeline tools: `extract_entities`, `extract_relations`, `add_to_graph`, `query_graph`, `find_related`, `infer_facts`, `export_subgraph`
+  - Added `AgnoSharedContext` — team-level coordinator with a single shared `ContextGraph`; `bind_agent(role)` returns a role-scoped `_AgentScopedStore` with cross-agent memory visibility; thread-safe via `RLock`
+  - All 5 components degrade gracefully when `agno` is not installed (`AGNO_AVAILABLE` flag); importable and functional without agno present
+  - Added `agno = ["agno>=1.0.0"]` optional dependency in `pyproject.toml`; included in `all` extra
+  - 110 integration tests in `tests/integrations/agno/` covering all public APIs, MemoryDb protocol compliance, GraphRAG search, tool registration, shared memory isolation, and thread-safety
+  - 3 cookbook notebooks in `cookbook/integrations/`: `agno_decision_intelligence.ipynb` (loan underwriting), `agno_graphrag_context.ipynb` (regulatory compliance), `agno_multi_agent_shared_context.ipynb` (multi-agent team coordination)
+  - Full reference documentation in `docs/integrations/agno.md`
+
+- **Novita AI Provider** (PR #374 by @Alex-wuhu):
+  - Added `NovitaProvider` — OpenAI-compatible integration via `https://api.novita.ai/v1`; supports `generate()` and `generate_structured()` (JSON forced format)
+  - Default model: `deepseek/deepseek-v3.2`; configurable via `NOVITA_API_KEY` environment variable
+  - Registered `"novita"` in the built-in provider factory; usable via `create_provider("novita")`
+  - Added integration tests in `tests/test_novita_integration.py` with proper assertions and graceful skip when `NOVITA_API_KEY` is unset
+
+- **Native Datalog Reasoning Engine** (PR #371, Issue #368 by @ZohaibHassan16, reviewed and fixed by @KaifAhmad1):
+  - Added `DatalogReasoner` to `semantica.reasoning` — a pure-Python, bottom-up semi-naive fixpoint engine with guaranteed termination on finite graphs
+  - Supports recursive Horn clause rules (e.g. `ancestor(X,Y) :- parent(X,Z), ancestor(Z,Y).`) that existing engines loop on indefinitely
+  - Memory-optimized `_unify()` with deferred dict allocation — zero allocation on failed unifications
+  - `O(1)` delta-index lookup per iteration eliminates redundant `O(N)` rule re-evaluations in semi-naive loop
+  - `query("pred(?X, ?Y)")` returns variable-binding dicts; supports both uppercase `?Y` and lowercase `?y` variable syntax
+  - `query(..., bindings={"Y": "val"})` pre-binds variables for exact-match verification
+  - `load_from_graph(ContextGraph)` converts all edges and nodes to Datalog facts in one call; handles both `find_edges`/`find_nodes` and raw `edges`/`nodes` graph APIs
+  - `add_fact()` accepts `"pred(a, b)"` strings and Semantica dicts (`subject/predicate/object`, `source/target/type`, `type/id` shapes); warns on unrecognised dict format instead of silently dropping
+  - `_derived` cache flag — `derive_all()` skips re-evaluation when no facts or rules have changed since last run; `query()` respects the cache
+  - Progress tracking wrapped in `try/finally` — `stop_tracking()` always called even on exception
+  - `DatalogReasoner`, `DatalogFact`, `DatalogRule` exported from `semantica.reasoning`
+  - 18 tests covering recursive rules, multi-hop inference, variable binding, graph integration, idempotency, and edge cases — all passing
+- **Ontology Diff & Migration** (PR #367 by @ZohaibHassan16, review & fixes by @KaifAhmad1):
+  - `VersionManager.diff_ontologies(base, target)` — structured diff between two ontology dicts using hash-map lookups; handles URI-less items via `name` fallback; deep equality checks for unordered lists; now covers classes, properties, individuals, and axioms
+  - `ChangeLogAnalyzer.analyze(diff)` — classifies each change by semantic impact: removed classes/properties → `CRITICAL/BREAKING`; narrowed domain/range/cardinality → `HIGH/BREAKING`; hierarchy modifications → `MEDIUM/POTENTIALLY_BREAKING`; added elements and annotation updates → `INFO/NON_BREAKING`
+  - `ImpactReport` dataclass and `generate_change_report(diff)` public helper — returns a structured dict with `summary`, `impact_classification` (breaking / potentially_breaking / safe), `recommendations`, and the raw `diff`
+  - `OntologyEngine.compare_versions(base_id, target_id, **options)` — end-to-end orchestrator: loads versions from `VersionManager`, runs `diff_ontologies`, generates impact report; accepts `base_dict`/`target_dict` overrides to bypass version store; `run_validation=True` triggers `OntologyValidator` on the target schema; `graph_data=...` additionally runs `GraphValidator` on instance data against the new schema
+  - `OntologyEngine.get_ontology_version_dict(version_id)` — utility to load a registered version as a plain dict ready for diffing
+  - Documentation added to `docs/reference/change_management.md`: "Ontology Diff & Migration" section with code example and full report format reference
+  - 7 tests added to `tests/change_management/test_managers.py` covering: empty diff, unordered list equality, URI/name fallback, breaking class removal, narrowed domain (HIGH), safe additions and annotation changes, `compare_versions` dict override, version-not-found error path, individuals/axioms diff coverage, null constraint value flagged as breaking
+  - **Fixes applied post-review (by @KaifAhmad1)**:
+    - Fixed typo in `ChangeCategory` enum value: `"potenitally_breaking"` → `"potentially_breaking"`
+    - Fixed missing space in impact description string: `f"New{entity_type}"` → `f"New {entity_type}"`
+    - Added null-value guard in `_analyze_field_changes` — constraint fields with `None` old/new value are now correctly flagged as breaking instead of silently passing the subset check
+    - Made `ChangeLogAnalyzer` stateless — `report` is now a local variable passed into `_generate_recommendations(report)` rather than stored as `self.report`; removes re-entrancy hazard
+    - Removed no-op `__init__` from `ChangeLogAnalyzer`
+    - Replaced non-portable emoji markers in recommendations (`✘✘✘`, `¤¤¤`, `☺☺☺`) with plain-text tags (`[BREAKING]`, `[WARNING]`, `[SAFE]`)
+    - Extended `diff_ontologies` to cover `individuals` and `axioms` — previously only classes and properties were diffed; the public `compare_versions` path now returns all four element types
+    - Fixed exception chaining in `compare_versions`: `raise ProcessingError(...) from e` to preserve original traceback
+    - Removed silent `ImportError` swallow for `GraphValidator` — it is a first-party module; an `ImportError` indicates a broken install, not a graceful skip
+    - Added comment on deferred `VersionManager` import in `OntologyEngine.__init__` explaining the circular-import constraint
+    - Fixed import-before-docstring in `tests/change_management/test_managers.py`
+    - Fixed broken Markdown link syntax in docs JSON example block: `"[http://...](http://...)"` → bare URI string
+    - Updated docs recommendations example to match the new plain-text tag format
+
+- **Ontology Alignment API** (PR #361 by @ZohaibHassan16, review & fixes by @KaifAhmad1):
+  - Alignment representation using standard RDF predicates: `owl:equivalentClass`, `owl:equivalentProperty`, `owl:sameAs`, `skos:exactMatch`, `skos:closeMatch`, `skos:broadMatch`, `skos:narrowMatch`, `skos:relatedMatch`
+  - `OntologyEngine.create_alignment(source_uri, target_uri, predicate)` — store alignment triples in TripletStore
+  - `OntologyEngine.get_alignments(entity_uri)` — bidirectional retrieval of all alignments for an entity
+  - `OntologyEngine.list_alignments(ontology_uri=None)` — list all alignments, optionally filtered by ontology namespace
+  - `NamespaceManager.get_alignment_predicates()` — expose standard OWL/SKOS alignment URIs as a convenience dict
+  - `ReuseManager.suggest_alignments(target, source)` — O(N+M) hashmap heuristic to suggest alignments based on exact label matches across ontologies
+  - `ReuseManager.merge_ontology_data(..., compute_alignments=True)` — optionally attach suggested alignments to merge output without auto-committing unverified triples
+  - `QueryEngine.expand_entity_uri(uri, store, use_alignments=True)` — bidirectional SPARQL expansion to include aligned equivalents; no-ops when flag is False
+  - `QueryEngine.build_values_clause(variable, uris)` — generate a SPARQL `VALUES` clause for injecting expanded URIs into queries
+  - Alignment-aware queries section added to `docs/reference/triplet_store.md`
+  - Ontology Alignment section added to `docs/reference/ontology.md`
+  - **Fixes applied post-review (by @KaifAhmad1)**:
+    - Fixed progress tracker leak in `expand_entity_uri` — `stop_tracking` was only called inside the `hasattr(execute_sparql)` branch; backends without it silently leaked a tracker entry
+    - Fixed `relatedMatch` predicate gap — `get_alignment_predicates()` exposed `skos:relatedMatch` but all three SPARQL FILTER lists omitted it, making those alignments permanently invisible
+    - Fixed SPARQL injection in `list_alignments` — previously only `"` was escaped; `\`, `{`, and `}` are now also percent-encoded to prevent WHERE block breakout
+    - Fixed SPARQL injection in `build_values_clause` — URIs now run through `_sanitize_uri` before wrapping in angle-bracket literals
+    - Added full-URI validation in `create_alignment` — raises `ProcessingError` if predicate is a CURIE instead of a full URI, preventing silent storage of unqueryable triples
+    - Fixed E2E test `test_end_to_end_cross_ontology_uri_flow` — previously mocked the method under test; now uses a real mock backend with `execute_sparql` to exercise the actual expansion and VALUES clause injection flow
+  - 19 tests added covering: `create_alignment`, `get_alignments`, `suggest_alignments`, merge with alignment computation, `expand_entity_uri` (enabled/disabled), `build_values_clause`, and full E2E cross-ontology query flow
 - **Context Explainability Output Fixes** (PR pending on `context` by @KaifAhmad1):
   - Fixed decision-node storage in `ContextGraph` so full human-readable `scenario`, `reasoning`, and decision metadata are preserved on graph nodes instead of degrading into opaque IDs or truncated display text
   - Fixed causal and precedent reconstruction paths in the context module so returned `Decision` objects prefer readable stored fields over raw node identifiers

@@ -944,6 +944,23 @@ class ContextGraph:
             return 0.0
         max_edges = n * (n - 1)  # Directed graph
         return len(self.edges) / max_edges
+    
+    def clear(self) -> None:
+        """
+        Fully reset the graph state, clearing all nodes, edges, and internal indexes.
+        """
+        self.nodes.clear()
+        self.edges.clear()
+        
+    
+        if hasattr(self, '_adjacency'):
+            self._adjacency.clear()
+        if hasattr(self, 'node_type_index'):
+            self.node_type_index.clear()
+        if hasattr(self, 'edge_type_index'):
+            self.edge_type_index.clear()
+            
+        self.logger.debug("Graph state fully cleared.")
 
     # --- Internal Helpers ---
 
@@ -991,8 +1008,10 @@ class ContextGraph:
             self.node_type_index['unknown'].add(node.node_id)
 
         if getattr(self, "mutation_callback", None):
-            self.mutation_callback("ADD_NODE", node.node_id, node.to_dict())
-
+            try:
+                self.mutation_callback("ADD_NODE", node.node_id, node.to_dict())
+            except Exception as e:
+                self.logger.warning(f"Audit trail callback failed for node {node.node_id}: {e}")
         return True
     
     def _add_internal_edge(self, edge: ContextEdge) -> bool:
@@ -1012,8 +1031,12 @@ class ContextGraph:
         self._adjacency[edge.source_id].append(edge)
 
         if getattr(self, "mutation_callback", None):
-            edge_id = f"{edge.source_id}|{edge.edge_type}|{edge.target_id}"
-            self.mutation_callback("ADD_EDGE", edge_id, edge.to_dict())
+            import json
+            edge_id = json.dumps([edge.source_id, edge.edge_type, edge.target_id])
+            try:
+                self.mutation_callback("ADD_EDGE", edge_id, edge.to_dict())
+            except Exception as e:
+                self.logger.warning(f"Audit trail callback failed for edge {edge_id}: {e}")
 
         return True
 
@@ -1294,8 +1317,7 @@ class ContextGraph:
     def from_dict(self, graph_dict: Dict[str, Any]) -> None:
         """Load graph from dictionary format."""
         # Clear existing graph
-        self.nodes.clear()
-        self.edges.clear()
+        self.clear()
 
         # Add nodes — restore validity windows if present
         for node_data in graph_dict.get("nodes", []):

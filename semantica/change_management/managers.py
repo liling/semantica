@@ -140,19 +140,33 @@ class TemporalVersionManager(BaseVersionManager):
             ValidationError: If input validation fails
             ProcessingError: If storage operation fails
         """
-        # Validate inputs
+        from .change_log import ChangeLogEntry
+        from ..utils.exceptions import ValidationError
+
         change_entry = ChangeLogEntry(
             timestamp=datetime.now().isoformat(), author=author, description=description
         )
 
-        # Create snapshot
+
+        valid_keys = {"nodes", "edges", "entities", "relationships"}
+        if not any(key in graph for key in valid_keys):
+            raise ValidationError(
+                "Graph dictionary is missing required schema keys. "
+                "Must contain 'nodes'/'edges' or 'entities'/'relationships'."
+            )
+
+
+        nodes_data = graph.get("nodes") or graph.get("entities") or []
+        edges_data = graph.get("edges") or graph.get("relationships") or []
+
+    
         snapshot = {
             "label": version_label,
             "timestamp": change_entry.timestamp,
             "author": change_entry.author,
             "description": change_entry.description,
-            "entities": graph.get("entities", []).copy(),
-            "relationships": graph.get("relationships", []).copy(),
+            "nodes": nodes_data.copy() if nodes_data else [],
+            "edges": edges_data.copy() if edges_data else [],
             "metadata": options.get("metadata", {}),
         }
 
@@ -184,7 +198,6 @@ class TemporalVersionManager(BaseVersionManager):
         Returns:
             dict: Detailed version comparison results
         """
-        # Handle both label strings and snapshot dictionaries
         if isinstance(v1_label_or_dict, str):
             version1 = self.storage.get(v1_label_or_dict)
             if not version1:
@@ -199,17 +212,15 @@ class TemporalVersionManager(BaseVersionManager):
         else:
             version2 = v2_label_or_dict
 
-        # Compute detailed diff
         detailed_diff = self._compute_detailed_diff(version1, version2)
 
-        # Maintain backward compatibility with summary
         summary = {
-            "entities_added": len(detailed_diff["entities_added"]),
-            "entities_removed": len(detailed_diff["entities_removed"]),
-            "entities_modified": len(detailed_diff["entities_modified"]),
-            "relationships_added": len(detailed_diff["relationships_added"]),
-            "relationships_removed": len(detailed_diff["relationships_removed"]),
-            "relationships_modified": len(detailed_diff["relationships_modified"]),
+            "nodes_added": len(detailed_diff["nodes_added"]),
+            "nodes_removed": len(detailed_diff["nodes_removed"]),
+            "nodes_modified": len(detailed_diff["nodes_modified"]),
+            "edges_added": len(detailed_diff["edges_added"]),
+            "edges_removed": len(detailed_diff["edges_removed"]),
+            "edges_modified": len(detailed_diff["edges_modified"]),
         }
 
         return {
@@ -232,71 +243,50 @@ class TemporalVersionManager(BaseVersionManager):
         Returns:
             Dict with detailed diff information
         """
-        entities1 = {
-            e.get("id", str(i)): e for i, e in enumerate(version1.get("entities", []))
-        }
-        entities2 = {
-            e.get("id", str(i)): e for i, e in enumerate(version2.get("entities", []))
-        }
+        nodes1 = {n.get("id", str(i)): n for i, n in enumerate(version1.get("nodes", []))}
+        nodes2 = {n.get("id", str(i)): n for i, n in enumerate(version2.get("nodes", []))}
 
-        relationships1 = {
-            self._relationship_key(r): r for r in version1.get("relationships", [])
-        }
-        relationships2 = {
-            self._relationship_key(r): r for r in version2.get("relationships", [])
-        }
+        edges1 = {self._relationship_key(e): e for e in version1.get("edges", [])}
+        edges2 = {self._relationship_key(e): e for e in version2.get("edges", [])}
 
-        # Entity differences
-        entity_ids1 = set(entities1.keys())
-        entity_ids2 = set(entities2.keys())
 
-        entities_added = [entities2[eid] for eid in entity_ids2 - entity_ids1]
-        entities_removed = [entities1[eid] for eid in entity_ids1 - entity_ids2]
+        node_ids1 = set(nodes1.keys())
+        node_ids2 = set(nodes2.keys())
 
-        entities_modified = []
-        for eid in entity_ids1 & entity_ids2:
-            if entities1[eid] != entities2[eid]:
-                changes = self._compute_entity_changes(entities1[eid], entities2[eid])
-                entities_modified.append(
-                    {
-                        "id": eid,
-                        "before": entities1[eid],
-                        "after": entities2[eid],
-                        "changes": changes,
-                    }
-                )
+        nodes_added = [nodes2[nid] for nid in node_ids2 - node_ids1]
+        nodes_removed = [nodes1[nid] for nid in node_ids1 - node_ids2]
+        nodes_modified = []
+        for nid in node_ids1 & node_ids2:
+            if nodes1[nid] != nodes2[nid]:
+                changes = self._compute_entity_changes(nodes1[nid], nodes2[nid])
+                nodes_modified.append({
+                    "id": nid, "before": nodes1[nid], "after": nodes2[nid], "changes": changes
+                })
 
-        # Relationship differences
-        rel_keys1 = set(relationships1.keys())
-        rel_keys2 = set(relationships2.keys())
 
-        relationships_added = [relationships2[key] for key in rel_keys2 - rel_keys1]
-        relationships_removed = [relationships1[key] for key in rel_keys1 - rel_keys2]
+        edge_keys1 = set(edges1.keys())
+        edge_keys2 = set(edges2.keys())
 
-        relationships_modified = []
-        for key in rel_keys1 & rel_keys2:
-            if relationships1[key] != relationships2[key]:
-                changes = self._compute_relationship_changes(
-                    relationships1[key], relationships2[key]
-                )
-                relationships_modified.append(
-                    {
-                        "key": key,
-                        "before": relationships1[key],
-                        "after": relationships2[key],
-                        "changes": changes,
-                    }
-                )
+        edges_added = [edges2[k] for k in edge_keys2 - edge_keys1]
+        edges_removed = [edges1[k] for k in edge_keys1 - edge_keys2]
+        edges_modified = []
+        for k in edge_keys1 & edge_keys2:
+            if edges1[k] != edges2[k]:
+                changes = self._compute_relationship_changes(edges1[k], edges2[k])
+                edges_modified.append({
+                    "key": k, "before": edges1[k], "after": edges2[k], "changes": changes
+                })
 
         return {
-            "entities_added": entities_added,
-            "entities_removed": entities_removed,
-            "entities_modified": entities_modified,
-            "relationships_added": relationships_added,
-            "relationships_removed": relationships_removed,
-            "relationships_modified": relationships_modified,
+            "nodes_added": nodes_added,
+            "nodes_removed": nodes_removed,
+            "nodes_modified": nodes_modified,
+            "edges_added": edges_added,
+            "edges_removed": edges_removed,
+            "edges_modified": edges_modified,
         }
-
+        
+        
     def _relationship_key(self, relationship: Dict[str, Any]) -> str:
         """Generate a unique key for a relationship."""
         source = relationship.get("source", "")
@@ -388,7 +378,13 @@ class TemporalVersionManager(BaseVersionManager):
         graph.mutation_callback = self.record_mutation
         self.logger.info(f"Attached mutation tracking to graph: {getattr(graph, 'graph_id', 'unknown')}")
 
-    def record_mutation(self, operation: str, entity_id: str, payload: Dict[str, Any]) -> None:
+    def record_mutation(
+        self, 
+        operation: str, 
+        entity_id: str, 
+        payload: Dict[str, Any],
+        version_label: Optional[str] = None
+    ) -> None:
         """
         Callback triggered by the graph to record granular mutations.
         """
@@ -397,7 +393,8 @@ class TemporalVersionManager(BaseVersionManager):
             timestamp=datetime.now().isoformat(),
             operation=operation,
             entity_id=entity_id,
-            payload=payload
+            payload=payload,
+            version_label=version_label
         )
         
         mutation_dict = {
@@ -409,7 +406,6 @@ class TemporalVersionManager(BaseVersionManager):
         }
         self.storage.save_mutation(mutation_dict)
         self.logger.debug(f"Recorded mutation: {operation} on {entity_id}")
-
     def tag_version(self, version_label: str, tag_name: str) -> None:
         """
         Create a named tag (e.g., 'v1.0-approved') for a specific version.
@@ -452,23 +448,24 @@ class TemporalVersionManager(BaseVersionManager):
                 "Rollback protection active. Explicitly set require_confirmation=False "
                 "to overwrite the current graph state."
             )
-        
+
         snapshot = self.storage.get(target_version)
         if not snapshot:
             raise ValidationError(f"Version '{target_version}' not found in storage.")
 
         self.logger.warning(f"Restoring graph to version '{target_version}' - clearing current state.")
         
-
-        graph.from_dict(snapshot)
+        graph_payload = {
+            "nodes": snapshot.get("nodes", []),
+            "edges": snapshot.get("edges", [])
+        }
+        
+        graph.from_dict(graph_payload)
         
         self.logger.info(f"Successfully restored graph to version '{target_version}'.")
         return True
         
-        
                         
-
-
 class OntologyVersionManager(BaseVersionManager):
     """
     Version management for ontologies with structural comparison.

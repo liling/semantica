@@ -391,3 +391,79 @@ prod_manager = TemporalVersionManager(
 for version in prod_manager.list_versions():
     print(f"{version['timestamp']}: {version['description']} by {version['author']}")
 ```
+
+---
+
+## Ontology Diff & Migration
+
+Semantica allows you to treat ontology schema changes with the same rigor as database migrations. By comparing two versions, you can generate a machine-readable diff and a structured impact report to catch breaking changes before they reach production.
+
+
+### Comparing Versions
+
+The `OntologyEngine` provides a high-level API to orchestrate the comparison of two schema versions.
+
+```python
+from semantica.ontology.engine import OntologyEngine
+
+engine = OntologyEngine()
+
+# Generate a migration impact report between v1.0 and v2.0
+report = engine.compare_versions(
+    base_id="v1.0", 
+    target_id="v2.0"
+)
+
+print(f"Total changes detected: {report['summary']['total_changes']}")
+```
+---
+
+### Understanding the Report Format
+
+The `compare_versions` method returns a comprehensive dictionary containing both a machine-readable diff and a human-readable impact analysis. 
+
+
+
+Here is the exact structure of the returned report:
+
+```json
+{
+  "summary": {
+    "total_changes": 12
+  },
+  "impact_classification": {
+    "breaking": [
+      {
+        "entity_uri": "http://example.org/Person",
+        "severity": "critical",
+        "description": "Class Person removed.",
+        "mitigation": "Migrate orphaned instances."
+      }
+    ],
+    "potentially_breaking": [],
+    "safe": []
+  },
+  "recommendations": [
+    "[BREAKING] Schedule downtime or validate existing data."
+  ],
+  "diff": {
+    "added_classes": [],
+    "removed_classes": [],
+    "changed_classes": [],
+    "added_properties": [],
+    "removed_properties": [],
+    "changed_properties": []
+  },
+  "validation_results": {
+    "valid": true,
+    "consistent": true,
+    "satisfiable": true,
+    "errors": [],
+    "warnings": []
+  },
+  "graph_validation": {
+    "valid": false,
+    "errors": ["Instance data violates new domain constraint"],
+    "warnings": []
+  }
+}

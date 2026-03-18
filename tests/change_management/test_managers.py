@@ -9,10 +9,13 @@ import os
 import tempfile
 import pytest
 from semantica.change_management import (
-    TemporalVersionManager, 
+    TemporalVersionManager,
     OntologyVersionManager,
     ChangeLogEntry
 )
+from semantica.change_management.change_log import generate_change_report, ChangeLogAnalyzer
+from semantica.change_management.ontology_version_manager import VersionManager
+from semantica.ontology.engine import OntologyEngine
 from semantica.utils.exceptions import ValidationError, ProcessingError
 
 
@@ -330,3 +333,142 @@ class TestOntologyVersionManager:
         finally:
             if os.path.exists(db_path):
                 os.remove(db_path)
+                
+
+    def test_diff_empty_ontologies(self):
+        """Test diffing entirely empty dictionaries."""
+        manager = VersionManager()
+        diff = manager.diff_ontologies({}, {})
+        
+        assert len(diff["added_classes"]) == 0
+        assert len(diff["removed_classes"]) == 0
+        assert len(diff["changed_classes"]) == 0
+
+    def test_diff_unordered_list_equality(self):
+        """Test that list order doesn't trigger a false positive change."""
+        manager = VersionManager()
+        base = {"classes": [{"uri": "http://ex.org/C1", "domain": ["A", "B"]}]}
+        target = {"classes": [{"uri": "http://ex.org/C1", "domain": ["B", "A"]}]}  
+        
+        diff = manager.diff_ontologies(base, target)
+        assert len(diff["changed_classes"]) == 0  
+
+    def test_diff_missing_uris(self):
+        """Tests whether missing URIs fallback to 'name' deterministically."""
+        manager = VersionManager()
+        base = {"classes": [{"name": "Person", "label": "Human"}]}
+        target = {"classes": [{"name": "Person", "label": "Homo Sapiens"}]}
+        
+        diff = manager.diff_ontologies(base, target)
+        assert len(diff["changed_classes"]) == 1
+        
+        change = diff["changed_classes"][0]
+        assert change["name"] == "Person"
+        assert change["changes"]["label"]["old"] == "Human"
+        assert change["changes"]["label"]["new"] == "Homo Sapiens"
+
+
+class TestChangeLogAnalyzer:
+    """Test cases for Impact Analysis & Reporting."""
+
+    def test_breaking_change_removed_class(self):
+        """Test that removing a class is flagged as CRITICAL/BREAKING."""
+        diff = {"removed_classes": [{"uri": "http://ex.org/Person"}]}
+        report = generate_change_report(diff)
+        
+        assert len(report["impact_classification"]["breaking"]) == 1
+        assert report["impact_classification"]["breaking"][0]["severity"] == "critical"
+        assert "removed" in report["impact_classification"]["breaking"][0]["description"]
+
+    def test_breaking_change_narrowed_domain(self):
+        """Test that narrowing a domain is flagged as HIGH/BREAKING."""
+        diff = {
+            "changed_properties": [{
+                "uri": "http://ex.org/worksFor", 
+                "changes": {"domain": {"old": ["Person", "Organization"], "new": ["Person"]}}
+            }]
+        }
+        report = generate_change_report(diff)
+        
+        assert len(report["impact_classification"]["breaking"]) == 1
+        assert report["impact_classification"]["breaking"][0]["severity"] == "high"
+        assert "restricted" in report["impact_classification"]["breaking"][0]["description"]
+
+    def test_safe_change_added_class_and_label(self):
+        """Test that adding classes and changing annotations is SAFE."""
+        diff = {
+            "added_classes": [{"uri": "http://ex.org/NewClass"}],
+            "changed_properties": [{
+                "uri": "http://ex.org/name", 
+                "changes": {"label": {"old": "Name", "new": "Full Name"}}
+            }]
+        }
+        report = generate_change_report(diff)
+        
+        assert len(report["impact_classification"]["safe"]) == 2
+        assert len(report["impact_classification"]["breaking"]) == 0
+        assert len(report["impact_classification"]["potentially_breaking"]) == 0
+
+
+class TestOntologyEngineMigration:
+    """Test cases for Public API Orchestration."""
+
+    def test_compare_versions_with_dicts_override(self):
+        """Test for bypassing the DB fetch by passing dicts directly."""
+        engine = OntologyEngine()
+        
+        base_dict = {"classes": [{"uri": "http://ex.org/C1", "label": "Old"}]}
+        target_dict = {"classes": [{"uri": "http://ex.org/C1", "label": "New"}]}
+        
+        # We pass fake version IDs ("v1", "v2"), but the engine should use our dicts
+        report = engine.compare_versions("v1", "v2", base_dict=base_dict, target_dict=target_dict)
+        
+        assert report["summary"]["total_changes"] == 1
+        assert len(report["impact_classification"]["safe"]) == 1
+        assert report["impact_classification"]["safe"][0]["entity_uri"] == "http://ex.org/C1"
+
+    def test_compare_versions_version_not_found_raises(self):
+        """Test that compare_versions raises ProcessingError when version ID is not registered."""
+        engine = OntologyEngine()
+
+        with pytest.raises(ProcessingError):
+            engine.compare_versions("nonexistent_v1", "nonexistent_v2")
+
+    def test_compare_versions_diff_includes_individuals_and_axioms(self):
+        """Test that the diff covers individuals and axioms, not just classes/properties."""
+        engine = OntologyEngine()
+
+        base_dict = {
+            "classes": [],
+            "properties": [],
+            "individuals": [{"uri": "http://ex.org/john"}],
+            "axioms": [{"uri": "http://ex.org/rule1", "expression": "Person hasName exactly 1 string"}],
+        }
+        target_dict = {
+            "classes": [],
+            "properties": [],
+            "individuals": [
+                {"uri": "http://ex.org/john"},
+                {"uri": "http://ex.org/jane"},
+            ],
+            "axioms": [],
+        }
+
+        report = engine.compare_versions("v1", "v2", base_dict=base_dict, target_dict=target_dict)
+
+        diff = report["diff"]
+        assert any(i.get("uri") == "http://ex.org/jane" for i in diff["added_individuals"])
+        assert any(a.get("uri") == "http://ex.org/rule1" for a in diff["removed_axioms"])
+
+    def test_compare_versions_null_constraint_value_flagged_as_breaking(self):
+        """Test that a constraint field going from None to a value is flagged as breaking."""
+        diff = {
+            "changed_properties": [{
+                "uri": "http://ex.org/worksFor",
+                "changes": {"domain": {"old": None, "new": ["Person"]}}
+            }]
+        }
+        report = generate_change_report(diff)
+
+        assert len(report["impact_classification"]["breaking"]) == 1
+        assert report["impact_classification"]["breaking"][0]["severity"] == "high"

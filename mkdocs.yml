@@ -138,6 +138,7 @@ nav:
     - examples.md
     - glossary.md
   - Integrations:
+    - Agno: integrations/agno.md
     - Docling: integrations/docling.md
     - Snowflake: integrations/snowflake.md
   - Cookbook: cookbook.md

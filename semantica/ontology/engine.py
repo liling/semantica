@@ -10,6 +10,7 @@ from .owl_generator import OWLGenerator
 from .ontology_evaluator import OntologyEvaluator
 from .ontology_validator import OntologyValidator
 from .llm_generator import LLMOntologyGenerator
+from ..semantic_extract.triplet_extractor import Triplet
 
 
 class OntologyEngine:
@@ -25,6 +26,11 @@ class OntologyEngine:
         self.evaluator = OntologyEvaluator(**config)
         self.validator = OntologyValidator(**config)
         self.llm = LLMOntologyGenerator(**config)
+        self.store = config.get("store")
+
+        # Deferred to avoid circular import: change_management → ontology → change_management
+        from ..change_management.ontology_version_manager import VersionManager
+        self.version_manager = config.get("version_manager") or VersionManager(**config)
 
     def from_data(self, data: Dict[str, Any], **options) -> Dict[str, Any]:
         tracking_id = self.progress.start_tracking(
@@ -56,7 +62,135 @@ class OntologyEngine:
         **options,
     ) -> List[Dict[str, Any]]:
         return self.propgen.infer_properties(entities, relationships, classes, **options)
+    
+    def _sanitize_uri(self, uri: str) -> str:
+        """Prevent SPARQL injection by percent-encoding dangerous characters."""
+        if not isinstance(uri, str):
+            return ""
+        return uri.replace("<", "%3C").replace(">", "%3E")
+    
+    def create_alignment(self, source_uri: str, target_uri: str, predicate: str, **options) -> None:
+        """
+        Creates an alignment between two ontology entities and stores it.
+        """
+        if not self.store:
+            raise ProcessingError("TripletStore instance not configured in OntologyEngine.")
 
+        if not predicate.startswith(("http://", "https://")):
+            raise ProcessingError(
+                f"predicate must be a full URI (e.g. 'http://www.w3.org/2002/07/owl#equivalentClass'), "
+                f"not a CURIE: '{predicate}'"
+            )
+
+        tracking_id = self.progress.start_tracking(
+            module="ontology",
+            submodule="OntologyEngine",
+            message=f"Creating alignment: {source_uri} -> {target_uri}"
+        )
+        try:
+            triplet = Triplet(subject=source_uri, predicate=predicate, object=target_uri)
+            self.store.add_triplet(triplet, **options)
+            
+            self.progress.stop_tracking(tracking_id, status="completed", message="Alignment created")
+        except Exception as e:
+            self.progress.stop_tracking(tracking_id, status="failed", message=str(e))
+            self.logger.error(f"Failed to create alignment: {e}")
+            raise ProcessingError(f"Alignment creation failed: {e}")
+
+    def get_alignments(self, entity_uri: str, **options) -> List[Dict[str, Any]]:
+        """
+        Retrieves all alignments for a specific entity URI (bidirectional).
+        """
+        if not self.store:
+            raise ProcessingError("TripletStore instance not configured in OntologyEngine.")
+        
+        safe_uri = self._sanitize_uri(entity_uri)
+
+        query = f"""
+        SELECT ?s ?p ?o WHERE {{
+            {{ <{safe_uri}> ?p ?o . BIND(<{safe_uri}> AS ?s) }}
+            UNION
+            {{ ?s ?p <{safe_uri}> . BIND(<{safe_uri}> AS ?o) }}
+            
+            FILTER (?p IN (
+                <http://www.w3.org/2002/07/owl#equivalentClass>,
+                <http://www.w3.org/2002/07/owl#equivalentProperty>,
+                <http://www.w3.org/2002/07/owl#sameAs>,
+                <http://www.w3.org/2004/02/skos/core#exactMatch>,
+                <http://www.w3.org/2004/02/skos/core#closeMatch>,
+                <http://www.w3.org/2004/02/skos/core#broadMatch>,
+                <http://www.w3.org/2004/02/skos/core#narrowMatch>,
+                <http://www.w3.org/2004/02/skos/core#relatedMatch>
+            ))
+        }}
+        """
+        try:
+            results = self.store.execute_query(query, **options)
+
+            alignments = []
+            if hasattr(results, 'bindings'):
+                for b in results.bindings:
+                    alignments.append({
+                        "source": b.get("s", {}).get("value") if isinstance(b.get("s"), dict) else b.get("s"),
+                        "predicate": b.get("p", {}).get("value") if isinstance(b.get("p"), dict) else b.get("p"),
+                        "target": b.get("o", {}).get("value") if isinstance(b.get("o"), dict) else b.get("o")
+                    })
+            return alignments
+        except Exception as e:
+            self.logger.error(f"Failed to get alignments for {entity_uri}: {e}")
+            raise ProcessingError(f"Failed to get alignments: {e}")
+
+    def list_alignments(self, ontology_uri: Optional[str] = None, **options) -> List[Dict[str, Any]]:
+        """
+        Lists all alignments, optionally filtered by an ontology URI.
+        """
+        if not self.store:
+            raise ProcessingError("TripletStore instance not configured in OntologyEngine.")
+
+        filter_clause = ""
+        if ontology_uri:
+            # Sanitize characters that could break out of the SPARQL string literal or WHERE block
+            safe_ontology_uri = (
+                ontology_uri
+                .replace("\\", "%5C")
+                .replace('"', '%22')
+                .replace("{", "%7B")
+                .replace("}", "%7D")
+            )
+            filter_clause = f'FILTER(STRSTARTS(STR(?s), "{safe_ontology_uri}") || STRSTARTS(STR(?o), "{safe_ontology_uri}"))'
+
+        query = f"""
+        SELECT ?s ?p ?o WHERE {{
+            ?s ?p ?o .
+            FILTER (?p IN (
+                <http://www.w3.org/2002/07/owl#equivalentClass>,
+                <http://www.w3.org/2002/07/owl#equivalentProperty>,
+                <http://www.w3.org/2002/07/owl#sameAs>,
+                <http://www.w3.org/2004/02/skos/core#exactMatch>,
+                <http://www.w3.org/2004/02/skos/core#closeMatch>,
+                <http://www.w3.org/2004/02/skos/core#broadMatch>,
+                <http://www.w3.org/2004/02/skos/core#narrowMatch>,
+                <http://www.w3.org/2004/02/skos/core#relatedMatch>
+            ))
+            {filter_clause}
+        }}
+        """
+        try:
+            results = self.store.execute_query(query, **options)
+            
+            alignments = []
+            if hasattr(results, 'bindings'):
+                for b in results.bindings:
+                    alignments.append({
+                        "source": b.get("s", {}).get("value") if isinstance(b.get("s"), dict) else b.get("s"),
+                        "predicate": b.get("p", {}).get("value") if isinstance(b.get("p"), dict) else b.get("p"),
+                        "target": b.get("o", {}).get("value") if isinstance(b.get("o"), dict) else b.get("o")
+                    })
+            return alignments
+        except Exception as e:
+            self.logger.error(f"Failed to list alignments: {e}")
+            raise ProcessingError(f"Failed to list alignments: {e}")
+            
     def evaluate(self, ontology: Dict[str, Any], **options):
         return self.evaluator.evaluate_ontology(ontology, **options)
 
@@ -69,3 +203,70 @@ class OntologyEngine:
     def export_owl(self, ontology: Dict[str, Any], path: str, format: str = "turtle"):
         return self.owl.export_owl(ontology, path, format=format)
 
+    def get_ontology_version_dict(self, version_id: str) -> Dict[str, Any]:
+        """Utility to load an ontology version as plain dict ready for diffing."""
+        version_record = self.version_manager.get_version(version_id)
+        if not version_record:
+            raise ProcessingError(f"Version {version_id} not found.")
+        return version_record.metadata.get("structure", {"classes": [], "properties": []})
+
+    def compare_versions(self, base_id: str, target_id: str, **options) -> Dict[str, Any]:
+        """
+        Orchestrates version loading, diff computation, and report generation.
+
+        Args:
+            base_id: Version ID of the old ontology
+            target_id: Version ID of the new ontology
+            **options: Can pass 'base_dict' and 'target_dict' directly to bypass loading.
+                       Can pass 'run_validation=True' to validate schema.
+                       Can pass 'graph_data' to validate instances against new schema.
+
+        Returns:
+            A structured dictionary containing the impact report and machine-readable diff.
+        """
+        tracking_id = self.progress.start_tracking(
+            module="ontology",
+            submodule="OntologyEngine",
+            message=f"Comparing ontology versions: {base_id} -> {target_id}"
+        )
+
+        try:
+            # Deferred to avoid circular import
+            from ..change_management.change_log import generate_change_report
+            from ..kg.graph_validator import GraphValidator
+
+            base_dict = options.get("base_dict") or self.get_ontology_version_dict(base_id)
+            target_dict = options.get("target_dict") or self.get_ontology_version_dict(target_id)
+
+            diff_result = self.version_manager.diff_ontologies(base_dict, target_dict)
+            report = generate_change_report(diff_result)
+            report["diff"] = diff_result
+
+            if options.get("run_validation"):
+                self.progress.update_tracking(tracking_id, message="Running validation on target schema...")
+                val_res = self.validate(target_dict, **options)
+                report["validation_results"] = {
+                    "valid": getattr(val_res, "valid", getattr(val_res, "is_valid", False)),
+                    "consistent": getattr(val_res, "consistent", True),
+                    "satisfiable": getattr(val_res, "satisfiable", True),
+                    "errors": getattr(val_res, "errors", []),
+                    "warnings": getattr(val_res, "warnings", [])
+                }
+
+                if "graph_data" in options:
+                    self.progress.update_tracking(tracking_id, message="Running graph data validation...")
+                    kg_validator = GraphValidator(**self.config)
+                    kg_res = kg_validator.validate(options["graph_data"], ontology=target_dict, **options)
+                    report["graph_validation"] = {
+                        "valid": getattr(kg_res, "valid", getattr(kg_res, "is_valid", False)),
+                        "errors": getattr(kg_res, "errors", []),
+                        "warnings": getattr(kg_res, "warnings", [])
+                    }
+
+            self.progress.stop_tracking(tracking_id, status="completed", message="Comparison complete")
+            return report
+
+        except Exception as e:
+            self.progress.stop_tracking(tracking_id, status="failed", message=str(e))
+            self.logger.error(f"Failed to compare versions: {e}")
+            raise ProcessingError(f"Version comparison failed: {e}") from e

@@ -199,8 +199,21 @@ dev = [
   "ipykernel>=6.15.0"
 ]
 
-# ---- Everything ----
+# Explorer Dashboard
+explorer = [
+  "fastapi>=0.100.0",
+  "uvicorn[standard]>=0.22.0",
+  "websockets>=11.0",
+  "python-multipart>=0.0.6"
+]
+explorer-lite = [
+  "streamlit>=1.25.0",
+  "streamlit-agraph>=0.0.45"
+]
+
+# Everything
 all = [
+  "semantica[dev,viz,gpu,infra,cloud,monitoring,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,explorer]",
   "semantica[dev,viz,gpu,infra,cloud,monitoring,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,agno]"
 ]
 
@@ -209,6 +222,7 @@ all = [
 semantica = "semantica.cli:main"
 semantica-server = "semantica.server:main"
 semantica-worker = "semantica.worker:main"
+semantica-explorer = "semantica.explorer:main"
 
 # ---------------- TOOLING ----------------
 [tool.setuptools.packages.find]

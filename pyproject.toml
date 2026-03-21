@@ -173,6 +173,9 @@ gpu = [
   "cupy>=10.0.0"
 ]
 
+# ---- Agentic Framework Integrations ----
+agno = ["agno>=1.0.0"]
+
 # ---- Splitting / Chunking ----
 split-tiktoken = ["tiktoken>=0.5.0"]
 split-community = ["python-louvain>=0.16"]
@@ -196,9 +199,22 @@ dev = [
   "ipykernel>=6.15.0"
 ]
 
-# ---- Everything ----
+# Explorer Dashboard
+explorer = [
+  "fastapi>=0.100.0",
+  "uvicorn[standard]>=0.22.0",
+  "websockets>=11.0",
+  "python-multipart>=0.0.6"
+]
+explorer-lite = [
+  "streamlit>=1.25.0",
+  "streamlit-agraph>=0.0.45"
+]
+
+# Everything
 all = [
-  "semantica[dev,viz,gpu,infra,cloud,monitoring,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling]"
+  "semantica[dev,viz,gpu,infra,cloud,monitoring,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,explorer]",
+  "semantica[dev,viz,gpu,infra,cloud,monitoring,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,agno]"
 ]
 
 # ---------------- ENTRYPOINTS ----------------
@@ -206,11 +222,12 @@ all = [
 semantica = "semantica.cli:main"
 semantica-server = "semantica.server:main"
 semantica-worker = "semantica.worker:main"
+semantica-explorer = "semantica.explorer:main"
 
 # ---------------- TOOLING ----------------
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["semantica*"]
+include = ["semantica*", "integrations*"]
 
 [tool.black]
 line-length = 88
@@ -220,3 +237,6 @@ profile = "black"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require external services or API keys (deselect with '-m not integration')",
+]

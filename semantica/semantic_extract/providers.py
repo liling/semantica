@@ -988,6 +988,65 @@ class DeepSeekProvider(BaseProvider):
         except Exception as e:
             raise ProcessingError(f"Failed to parse JSON from DeepSeek response: {e}")
 
+
+class NovitaProvider(BaseProvider):
+    """Novita AI provider implementation - OpenAI-compatible API."""
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "deepseek/deepseek-v3.2", **kwargs):
+        """Initialize Novita provider."""
+        super().__init__(**kwargs)
+        self.api_key = api_key or config.get_api_key("novita")
+        self.model = model
+        self.base_url = "https://api.novita.ai/v1"
+        self.client = None
+        self._init_client()
+
+    def _init_client(self):
+        try:
+            from openai import OpenAI
+
+            if self.api_key:
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        except (ImportError, OSError):
+            self.client = None
+            self.logger.warning(
+                "openai library not installed. Install with: pip install semantica[llm-openai]"
+            )
+
+    def is_available(self) -> bool:
+        return self.client is not None
+
+    def generate(self, prompt: str, **kwargs) -> str:
+        if not self.client:
+            raise ProcessingError("Novita client not initialized. Set NOVITA_API_KEY or pass api_key.")
+
+        create_kwargs = {
+            "model": kwargs.get("model", self.model),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        self._add_if_set(create_kwargs, kwargs, "temperature", "max_tokens")
+
+        response = self.client.chat.completions.create(**create_kwargs)
+        return response.choices[0].message.content
+
+    def generate_structured(self, prompt: str, **kwargs) -> Union[dict, list]:
+        """Generate structured output."""
+        if not self.client:
+            raise ProcessingError("Novita client not initialized.")
+
+        create_kwargs = {
+            "model": kwargs.get("model", self.model),
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+        }
+        self._add_if_set(create_kwargs, kwargs, "temperature", "max_tokens")
+
+        response = self.client.chat.completions.create(**create_kwargs)
+        try:
+            return self._parse_json(response.choices[0].message.content)
+        except Exception as e:
+            raise ProcessingError(f"Failed to parse JSON from Novita response: {e}")
+
 class HuggingFaceLLMProvider(BaseProvider):
     """HuggingFace transformers for LLM tasks."""
 
@@ -1370,6 +1429,7 @@ class ProviderPool:
             "ollama": OllamaProvider,
             "huggingface_llm": HuggingFaceLLMProvider,
             "deepseek": DeepSeekProvider,
+             "novita": NovitaProvider,
         }
 
         provider_class = builtin.get(name.lower())

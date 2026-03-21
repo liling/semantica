@@ -162,7 +162,7 @@ class DecisionRecorder:
             entities: List of entity IDs to link
         """
         try:
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 for entity_id in entities:
                     self.graph_store.add_node(node_id=entity_id, node_type="Entity")
                     self.graph_store.add_edge(source_id=decision_id, target_id=entity_id, edge_type="ABOUT")
@@ -305,7 +305,7 @@ class DecisionRecorder:
             # Store exception in graph
             self._store_exception_node(exception)
             
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 self.graph_store.add_node(node_id=policy_id, node_type="Policy")
                 self.graph_store.add_edge(source_id=decision_id, target_id=exception.exception_id, edge_type="GRANTED_EXCEPTION")
                 self.graph_store.add_edge(source_id=exception.exception_id, target_id=policy_id, edge_type="OVERRIDDEN_POLICY")
@@ -441,7 +441,7 @@ class DecisionRecorder:
             if len(precedent_ids) != len(relationship_types):
                 raise ValueError("Precedent IDs and relationship types must have same length")
             
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 for precedent_id, relationship_type in zip(precedent_ids, relationship_types):
                     self.graph_store.add_edge(source_id=decision_id, target_id=precedent_id, edge_type=relationship_type)
                 self.logger.info(f"Linked {len(precedent_ids)} precedents to decision {decision_id}")
@@ -481,7 +481,7 @@ class DecisionRecorder:
             "node2vec_embedding": decision.node2vec_embedding
         })
         
-        if isinstance(self.graph_store, ContextGraph):
+        if type(self.graph_store) is ContextGraph:
             self.graph_store.add_node(
                 node_id=decision.decision_id,
                 node_type="Decision",
@@ -530,7 +530,7 @@ class DecisionRecorder:
             "justification": exception.justification
         })
         
-        if isinstance(self.graph_store, ContextGraph):
+        if type(self.graph_store) is ContextGraph:
             self.graph_store.add_node(
                 node_id=exception.exception_id,
                 node_type="Exception",

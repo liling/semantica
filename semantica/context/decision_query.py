@@ -328,7 +328,7 @@ class DecisionQuery:
             query_embedding = self.embedding_generator.generate(scenario)
         
         # Native ContextGraph flow
-        if isinstance(self.graph_store, ContextGraph):
+        if type(self.graph_store) is ContextGraph:
             nodes = self.graph_store.find_nodes(node_type="Decision")
             decisions = []
             for node in nodes:
@@ -423,7 +423,7 @@ class DecisionQuery:
             List of decisions in the category
         """
         try:
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 nodes = self.graph_store.find_nodes("Decision")
                 decisions = []
                 for node in nodes:
@@ -484,7 +484,7 @@ class DecisionQuery:
             List of decisions about the entity
         """
         try:
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 edges = self.graph_store.find_edges(edge_type="ABOUT")
                 decision_ids = {
                     e["source"] for e in edges 
@@ -560,7 +560,7 @@ class DecisionQuery:
         if end <= start:
             raise ValueError("End time must be after start time")
         try:
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 nodes = self.graph_store.find_nodes("Decision")
                 decisions = []
                 for node in nodes:
@@ -651,7 +651,7 @@ class DecisionQuery:
         if not (1 <= max_hops <= 10):
             raise ValueError("max_hops must be between 1 and 10")
         try:
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 from collections import deque
                 # Use BFS to find all Decisions within max_hops
                 queue = deque([(start_entity, 0)])
@@ -751,7 +751,7 @@ class DecisionQuery:
             List of path information
         """
         try:
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 from collections import deque
                 
                 # Check root node
@@ -767,25 +767,25 @@ class DecisionQuery:
                 
                 # Simple BFS path tracing matching cypher `MATCH path = (d)-[:REL*]-(related)`
                 # We limit depth to prevent infinite loops in cyclic graphs
-                max_depth = 5 
-                
+                max_depth = 5
+
+                # Fetch all relevant edges once before BFS to avoid O(nodes * edges) fetches
+                all_edges = []
+                for rel_type in relationship_types:
+                    all_edges.extend(self.graph_store.find_edges(edge_type=rel_type))
+
                 while queue:
                     curr_id, path_nodes, path_rels = queue.popleft()
-                    
+
                     if len(path_rels) > 0:
                         paths.append({
                             "path_length": len(path_rels),
                             "nodes": path_nodes,
                             "relationships": path_rels
                         })
-                        
+
                     if len(path_rels) >= max_depth:
                         continue
-                        
-                    # Find connecting edges of specified types where curr_id is source or target
-                    all_edges = []
-                    for rel_type in relationship_types:
-                        all_edges.extend(self.graph_store.find_edges(edge_type=rel_type))
                         
                     for edge in all_edges:
                         if edge["source"] == curr_id or edge["target"] == curr_id:
@@ -860,7 +860,7 @@ class DecisionQuery:
             if self.embedding_generator:
                 query_embedding = self.embedding_generator.generate(exception_reason)
             
-            if isinstance(self.graph_store, ContextGraph):
+            if type(self.graph_store) is ContextGraph:
                 nodes = self.graph_store.find_nodes("Exception")
                 exceptions = []
                 for node in nodes:

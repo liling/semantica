@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Snapshot Schema Compatibility Fix** (PR #393 by @ZohaibHassan16, reviewed by @KaifAhmad1, follow-up fixes by OpenAI Codex):
+  - Fixed silent snapshot restore failures caused by the `ContextGraph` `nodes`/`edges` schema not matching the version manager's legacy `entities`/`relationships` expectations
+  - Updated temporal snapshot handling to accept both `nodes`/`edges` and `entities`/`relationships`
+  - Preserved both schema shapes in stored snapshots to maintain backward compatibility during migration
+  - Fixed temporal diffing and detailed comparison paths so new-format and mixed-format snapshots compare correctly
+  - Fixed version metadata counts so `entity_count` and `relationship_count` remain accurate for both snapshot schemas
+  - Restored ontology snapshot compatibility fields removed during the PR follow-up iteration
+  - Added regression coverage for new-format snapshot creation, metadata counts, and mixed-schema diffing
+
 - **ContextGraph Traversal Fallbacks for DecisionQuery & DecisionRecorder** (PR #386 by @ZohaibHassan16, reviewed and fixed by @KaifAhmad1):
   - Added native `ContextGraph` fallback execution paths to all 7 `DecisionQuery` methods (`_find_precedents_basic`, `find_by_category`, `find_by_entity`, `find_by_time_range`, `multi_hop_reasoning`, `trace_decision_path`, `find_similar_exceptions`) — resolves issue #379 where hardcoded Cypher queries broke in-memory usage
   - Added native `ContextGraph` fallback paths to 4 `DecisionRecorder` methods (`link_entities`, `record_exception`, `link_precedents`, `_store_decision_node`, `_store_exception_node`) using `add_node` / `add_edge` primitives

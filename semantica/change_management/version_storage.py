@@ -39,6 +39,18 @@ from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
 
 
+def _snapshot_collections(snapshot: Dict[str, Any]) -> tuple[List[Any], List[Any]]:
+    """Normalize supported snapshot shapes for metadata summaries."""
+    entities = snapshot.get("entities")
+    if entities is None:
+        entities = snapshot.get("nodes", [])
+
+    relationships = snapshot.get("relationships")
+    if relationships is None:
+        relationships = snapshot.get("edges", [])
+
+    return list(entities or []), list(relationships or [])
+
 
 def create_graph_snapshot_record(
     version_id: str,
@@ -187,6 +199,7 @@ class InMemoryVersionStorage(VersionStorage):
             # Return metadata only (without full graph data)
             metadata_list = []
             for label, snapshot in self._storage.items():
+                entities, relationships = _snapshot_collections(snapshot)
                 metadata = {
                     "label": snapshot.get("label"),
                     "version_id": snapshot.get("version_id", snapshot.get("label")),
@@ -195,8 +208,8 @@ class InMemoryVersionStorage(VersionStorage):
                     "author": snapshot.get("author"),
                     "description": snapshot.get("description"),
                     "checksum": snapshot.get("checksum"),
-                    "entity_count": len(snapshot.get("entities", [])),
-                    "relationship_count": len(snapshot.get("relationships", [])),
+                    "entity_count": len(entities),
+                    "relationship_count": len(relationships),
                     }
                 metadata_list.append(metadata)
             return metadata_list
@@ -342,6 +355,7 @@ class SQLiteVersionStorage(VersionStorage):
                 metadata_list = []
                 for row in cursor.fetchall():
                     snapshot = json.loads(row[0])
+                    entities, relationships = _snapshot_collections(snapshot)
 
                     metadata = {
                         "label": snapshot.get("label"),
@@ -351,8 +365,8 @@ class SQLiteVersionStorage(VersionStorage):
                         "author": snapshot.get("author"),
                         "description": snapshot.get("description"),
                         "checksum": snapshot.get("checksum"),
-                        "entity_count": len(snapshot.get("entities", [])),
-                        "relationship_count": len(snapshot.get("relationships", [])),
+                        "entity_count": len(entities),
+                        "relationship_count": len(relationships),
                     }
                     metadata_list.append(metadata)
 

@@ -83,9 +83,10 @@ import numpy as np
 from ..embeddings import EmbeddingGenerator
 from ..graph_store import GraphStore
 from ..utils.logging import get_logger
+from .context_graph import ContextGraph
 from .decision_models import Decision, PolicyException
 
-# Optional imports for advanced features
+
 try:
     from ..kg import (
         CentralityCalculator, CommunityDetector, PathFinder, 
@@ -238,12 +239,10 @@ class DecisionQuery:
         """Find precedents using vector store hybrid search."""
         hybrid_search = self.vector_components["hybrid_search"]
         
-        # Build filters
         filters = {}
         if category:
             filters["category"] = category
         
-        # Search vector store
         results = hybrid_search.search(
             query=scenario,
             filters=filters,
@@ -328,7 +327,46 @@ class DecisionQuery:
         if self.embedding_generator:
             query_embedding = self.embedding_generator.generate(scenario)
         
-        # Build base query
+        # Native ContextGraph flow
+        if type(self.graph_store) is ContextGraph:
+            nodes = self.graph_store.find_nodes(node_type="Decision")
+            decisions = []
+            for node in nodes:
+                metadata = node.get("metadata", {}).get("properties", node.get("metadata", {}))
+                if category and metadata.get("category") != category:
+                    continue
+                
+                # Format to conform to _dict_to_decision
+                core_fields = {
+                    "category", "scenario", "reasoning", "outcome", "confidence", 
+                    "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
+                }
+                custom_metadata = {k: v for k, v in metadata.items() if k not in core_fields}
+                decision_data = {"id": node.get("id"), "metadata": custom_metadata}
+                decision_data.update({k: v for k, v in metadata.items() if k in core_fields})
+                
+                try:
+                    decision = self._dict_to_decision(decision_data)
+                except KeyError:
+                    continue
+                
+                if query_embedding and decision.reasoning_embedding:
+                    similarity = self._cosine_similarity(
+                        query_embedding, decision.reasoning_embedding
+                    )
+                    decision.metadata["similarity_score"] = similarity
+                decisions.append(decision)
+            
+            if query_embedding:
+                decisions.sort(
+                    key=lambda d: d.metadata.get("similarity_score", 0),
+                    reverse=True
+                )
+            
+            self.logger.info(f"Found {min(len(decisions), limit)} precedents for scenario")
+            return decisions[:limit]
+
+        # Build base Cypher query
         query_parts = ["MATCH (d:Decision)"]
         where_conditions = []
         params = {"limit": limit}
@@ -385,6 +423,29 @@ class DecisionQuery:
             List of decisions in the category
         """
         try:
+            if type(self.graph_store) is ContextGraph:
+                nodes = self.graph_store.find_nodes("Decision")
+                decisions = []
+                for node in nodes:
+                    metadata = node.get("metadata", {}).get("properties", node.get("metadata", {}))
+                    if metadata.get("category") == category:
+                        core_fields = {
+                            "category", "scenario", "reasoning", "outcome", "confidence", 
+                            "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
+                        }
+                        custom_metadata = {k: v for k, v in metadata.items() if k not in core_fields}
+                        decision_data = {"id": node.get("id"), "metadata": custom_metadata}
+                        decision_data.update({k: v for k, v in metadata.items() if k in core_fields})
+                        
+                        try:
+                            decisions.append(self._dict_to_decision(decision_data))
+                        except KeyError:
+                            continue
+                
+                decisions.sort(key=lambda d: d.timestamp, reverse=True)
+                self.logger.info(f"Found {min(len(decisions), limit)} decisions in category {category}")
+                return decisions[:limit]
+
             query = """
             MATCH (d:Decision {category: $category})
             RETURN d
@@ -423,6 +484,35 @@ class DecisionQuery:
             List of decisions about the entity
         """
         try:
+            if type(self.graph_store) is ContextGraph:
+                edges = self.graph_store.find_edges(edge_type="ABOUT")
+                decision_ids = {
+                    e["source"] for e in edges 
+                    if e["target"] == entity_id
+                }
+                
+                decisions = []
+                for d_id in decision_ids:
+                    node = self.graph_store.find_node(d_id)
+                    if node and node.get("type") == "Decision":
+                        metadata = node.get("metadata", {}).get("properties", node.get("metadata", {}))
+                        core_fields = {
+                            "category", "scenario", "reasoning", "outcome", "confidence", 
+                            "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
+                        }
+                        custom_metadata = {k: v for k, v in metadata.items() if k not in core_fields}
+                        decision_data = {"id": node.get("id"), "metadata": custom_metadata}
+                        decision_data.update({k: v for k, v in metadata.items() if k in core_fields})
+                        
+                        try:
+                            decisions.append(self._dict_to_decision(decision_data))
+                        except KeyError:
+                            continue
+                
+                decisions.sort(key=lambda d: d.timestamp, reverse=True)
+                self.logger.info(f"Found {min(len(decisions), limit)} decisions about entity {entity_id}")
+                return decisions[:limit]
+
             query = """
             MATCH (d:Decision)-[:ABOUT]->(e)
             WHERE e.id = $entity_id OR e.entity_id = $entity_id
@@ -470,6 +560,49 @@ class DecisionQuery:
         if end <= start:
             raise ValueError("End time must be after start time")
         try:
+            if type(self.graph_store) is ContextGraph:
+                nodes = self.graph_store.find_nodes("Decision")
+                decisions = []
+                for node in nodes:
+                    metadata = node.get("metadata", {}).get("properties", node.get("metadata", {}))
+                    ts_val = metadata.get("timestamp")
+                    if not ts_val:
+                        continue
+                    
+                    if isinstance(ts_val, str):
+                        try:
+                            dt = datetime.fromisoformat(ts_val)
+                        except ValueError:
+                            continue
+                    elif isinstance(ts_val, datetime):
+                        dt = ts_val
+                    else:
+                        continue
+                    
+                    # Ensure dt is naive or both are aware
+                    if start.tzinfo is not None and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=start.tzinfo)
+                    elif start.tzinfo is None and dt.tzinfo is not None:
+                        dt = dt.replace(tzinfo=None)
+
+                    if start <= dt <= end:
+                        core_fields = {
+                            "category", "scenario", "reasoning", "outcome", "confidence", 
+                            "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
+                        }
+                        custom_metadata = {k: v for k, v in metadata.items() if k not in core_fields}
+                        decision_data = {"id": node.get("id"), "metadata": custom_metadata}
+                        decision_data.update({k: v for k, v in metadata.items() if k in core_fields})
+                        
+                        try:
+                            decisions.append(self._dict_to_decision(decision_data))
+                        except KeyError:
+                            continue
+                            
+                decisions.sort(key=lambda d: d.timestamp, reverse=True)
+                self.logger.info(f"Found {min(len(decisions), limit)} decisions in time range")
+                return decisions[:limit]
+
             query = """
             MATCH (d:Decision)
             WHERE d.timestamp >= $start AND d.timestamp <= $end
@@ -518,6 +651,57 @@ class DecisionQuery:
         if not (1 <= max_hops <= 10):
             raise ValueError("max_hops must be between 1 and 10")
         try:
+            if type(self.graph_store) is ContextGraph:
+                from collections import deque
+                # Use BFS to find all Decisions within max_hops
+                queue = deque([(start_entity, 0)])
+                visited = {start_entity}
+                decisions = []
+                
+                while queue:
+                    current_node_id, current_hop = queue.popleft()
+                    
+                    if current_hop > 0:
+                        node = self.graph_store.find_node(current_node_id)
+                        if node and node.get("type") == "Decision":
+                            metadata = node.get("metadata", {}).get("properties", node.get("metadata", {}))
+                            core_fields = {
+                                "category", "scenario", "reasoning", "outcome", "confidence", 
+                                "timestamp", "decision_maker", "reasoning_embedding", "node2vec_embedding"
+                            }
+                            custom_metadata = {k: v for k, v in metadata.items() if k not in core_fields}
+                            decision_data = {"id": node.get("id"), "metadata": custom_metadata}
+                            decision_data.update({k: v for k, v in metadata.items() if k in core_fields})
+                            
+                            try:
+                                decision = self._dict_to_decision(decision_data)
+                                decision.metadata["hop_count"] = current_hop
+                                decisions.append(decision)
+                            except KeyError:
+                                pass
+                                
+                    if current_hop < max_hops:
+                        # Undirected traversal: Get both incoming and outgoing neighbors
+                        neighbors = []
+                        # Outgoing edges
+                        for edge in self.graph_store._adjacency.get(current_node_id, []):
+                            neighbors.append(edge.target_id)
+                        # Incoming edges
+                        for src_id, edges in self.graph_store._adjacency.items():
+                            for edge in edges:
+                                if edge.target_id == current_node_id:
+                                    neighbors.append(src_id)
+                                    
+                        for n_id in neighbors:
+                            if n_id not in visited:
+                                visited.add(n_id)
+                                queue.append((n_id, current_hop + 1))
+                                
+                # Sort by hop_count then timestamp desc
+                decisions.sort(key=lambda d: (d.metadata.get("hop_count", 0), -d.timestamp.timestamp()))
+                self.logger.info(f"Found {len(decisions)} decisions via multi-hop reasoning")
+                return decisions
+
             # Build multi-hop query
             query = f"""
             MATCH (start {{id: $start_entity}})
@@ -567,6 +751,61 @@ class DecisionQuery:
             List of path information
         """
         try:
+            if type(self.graph_store) is ContextGraph:
+                from collections import deque
+                
+                # Check root node
+                root = self.graph_store.find_node(decision_id)
+                if not root or root.get("type") != "Decision":
+                    return []
+                    
+                paths = []
+                # Queue stores (current_node_id, current_path_nodes, current_path_rels)
+                root_meta = root.get("metadata", {}).get("properties", root.get("metadata", {}))
+                root_info = {"decision_id": root.get("id"), "scenario": root_meta.get("scenario", ""), "category": root_meta.get("category", "")}
+                queue = deque([(decision_id, [root_info], [])])
+                
+                # Simple BFS path tracing matching cypher `MATCH path = (d)-[:REL*]-(related)`
+                # We limit depth to prevent infinite loops in cyclic graphs
+                max_depth = 5
+
+                # Fetch all relevant edges once before BFS to avoid O(nodes * edges) fetches
+                all_edges = []
+                for rel_type in relationship_types:
+                    all_edges.extend(self.graph_store.find_edges(edge_type=rel_type))
+
+                while queue:
+                    curr_id, path_nodes, path_rels = queue.popleft()
+
+                    if len(path_rels) > 0:
+                        paths.append({
+                            "path_length": len(path_rels),
+                            "nodes": path_nodes,
+                            "relationships": path_rels
+                        })
+
+                    if len(path_rels) >= max_depth:
+                        continue
+                        
+                    for edge in all_edges:
+                        if edge["source"] == curr_id or edge["target"] == curr_id:
+                            next_id = edge["target"] if edge["source"] == curr_id else edge["source"]
+                            
+                            # Avoid simple cycles in individual paths
+                            if any(n["decision_id"] == next_id for n in path_nodes):
+                                continue
+                                
+                            next_node = self.graph_store.find_node(next_id)
+                            if next_node:
+                                next_meta = next_node.get("metadata", {}).get("properties", next_node.get("metadata", {}))
+                                next_info = {"decision_id": next_node.get("id"), "scenario": next_meta.get("scenario", ""), "category": next_meta.get("category", "")}
+                                rel_info = {"from": edge["source"], "to": edge["target"], "type": edge["type"]}
+                                queue.append((next_id, path_nodes + [next_info], path_rels + [rel_info]))
+                
+                paths.sort(key=lambda x: x["path_length"])
+                self.logger.info(f"Traced {len(paths)} paths from decision {decision_id}")
+                return paths
+
             # Build relationship filter
             rel_filter = "|".join(relationship_types)
             
@@ -621,6 +860,40 @@ class DecisionQuery:
             if self.embedding_generator:
                 query_embedding = self.embedding_generator.generate(exception_reason)
             
+            if type(self.graph_store) is ContextGraph:
+                nodes = self.graph_store.find_nodes("Exception")
+                exceptions = []
+                for node in nodes:
+                    metadata = node.get("metadata", {}).get("properties", node.get("metadata", {}))
+                    core_fields = {
+                        "decision_id", "policy_id", "reason", "approver", 
+                        "approval_timestamp", "justification"
+                    }
+                    custom_metadata = {k: v for k, v in metadata.items() if k not in core_fields}
+                    exception_data = {"id": node.get("id"), "metadata": custom_metadata}
+                    exception_data.update({k: v for k, v in metadata.items() if k in core_fields})
+                    
+                    try:
+                        exception = self._dict_to_exception(exception_data)
+                    except KeyError:
+                        continue
+                        
+                    if query_embedding:
+                        reason_embedding = self.embedding_generator.generate(exception.reason)
+                        similarity = self._cosine_similarity(query_embedding, reason_embedding)
+                        exception.metadata["similarity_score"] = similarity
+                        
+                    exceptions.append(exception)
+                    
+                if query_embedding:
+                    exceptions.sort(
+                        key=lambda e: e.metadata.get("similarity_score", 0),
+                        reverse=True
+                    )
+                
+                self.logger.info(f"Found {min(len(exceptions), limit)} similar exceptions")
+                return exceptions[:limit]
+
             # Find exceptions with similar reasons
             query = """
             MATCH (e:Exception)
@@ -951,10 +1224,11 @@ class DecisionQuery:
                 
                 for measure_type, measure_data in centrality_measures.items():
                     if isinstance(measure_data, dict) and 'centrality' in measure_data:
-                        decision_measures[measure_type] = measure_data['centrality'].get(decision_id, 0.0)
-                
+                        val = measure_data['centrality'].get(decision_id, 0.0)
+                        decision_measures[measure_type] = val if isinstance(val, (int, float)) else 0.0
+
                 analysis["centrality_measures"] = decision_measures
-                
+
                 # Calculate overall influence score
                 measures = analysis["centrality_measures"]
                 analysis["influence_score"] = (

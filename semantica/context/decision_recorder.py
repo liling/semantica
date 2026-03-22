@@ -82,6 +82,7 @@ from .decision_models import (
     Decision, DecisionContext, Policy, PolicyException, 
     Precedent, ApprovalChain
 )
+from .context_graph import ContextGraph
 
 
 class DecisionRecorder:
@@ -161,6 +162,13 @@ class DecisionRecorder:
             entities: List of entity IDs to link
         """
         try:
+            if type(self.graph_store) is ContextGraph:
+                for entity_id in entities:
+                    self.graph_store.add_node(node_id=entity_id, node_type="Entity")
+                    self.graph_store.add_edge(source_id=decision_id, target_id=entity_id, edge_type="ABOUT")
+                self.logger.info(f"Linked decision {decision_id} to {len(entities)} entities")
+                return
+
             for entity_id in entities:
                 # Create ABOUT relationship between decision and entity
                 query = """
@@ -297,6 +305,13 @@ class DecisionRecorder:
             # Store exception in graph
             self._store_exception_node(exception)
             
+            if type(self.graph_store) is ContextGraph:
+                self.graph_store.add_node(node_id=policy_id, node_type="Policy")
+                self.graph_store.add_edge(source_id=decision_id, target_id=exception.exception_id, edge_type="GRANTED_EXCEPTION")
+                self.graph_store.add_edge(source_id=exception.exception_id, target_id=policy_id, edge_type="OVERRIDDEN_POLICY")
+                self.logger.info(f"Recorded exception: {exception.exception_id}")
+                return exception.exception_id
+
             # Create relationships
             query = """
             MATCH (d:Decision {decision_id: $decision_id})
@@ -426,6 +441,12 @@ class DecisionRecorder:
             if len(precedent_ids) != len(relationship_types):
                 raise ValueError("Precedent IDs and relationship types must have same length")
             
+            if type(self.graph_store) is ContextGraph:
+                for precedent_id, relationship_type in zip(precedent_ids, relationship_types):
+                    self.graph_store.add_edge(source_id=decision_id, target_id=precedent_id, edge_type=relationship_type)
+                self.logger.info(f"Linked {len(precedent_ids)} precedents to decision {decision_id}")
+                return
+
             for precedent_id, relationship_type in zip(precedent_ids, relationship_types):
                 # Create precedent relationship
                 query = """
@@ -447,6 +468,27 @@ class DecisionRecorder:
     
     def _store_decision_node(self, decision: Decision) -> None:
         """Store decision node in graph database."""
+        metadata = decision.metadata.copy() if decision.metadata else {}
+        metadata.update({
+            "category": decision.category,
+            "scenario": decision.scenario,
+            "reasoning": decision.reasoning,
+            "outcome": decision.outcome,
+            "confidence": decision.confidence,
+            "timestamp": decision.timestamp.isoformat() if decision.timestamp else None,
+            "decision_maker": decision.decision_maker,
+            "reasoning_embedding": decision.reasoning_embedding,
+            "node2vec_embedding": decision.node2vec_embedding
+        })
+        
+        if type(self.graph_store) is ContextGraph:
+            self.graph_store.add_node(
+                node_id=decision.decision_id,
+                node_type="Decision",
+                **metadata
+            )
+            return
+
         query = """
         CREATE (d:Decision {
             decision_id: $decision_id,
@@ -478,6 +520,24 @@ class DecisionRecorder:
     
     def _store_exception_node(self, exception: PolicyException) -> None:
         """Store exception node in graph database."""
+        metadata = exception.metadata.copy() if exception.metadata else {}
+        metadata.update({
+            "decision_id": exception.decision_id,
+            "policy_id": exception.policy_id,
+            "reason": exception.reason,
+            "approver": exception.approver,
+            "approval_timestamp": exception.approval_timestamp.isoformat() if exception.approval_timestamp else None,
+            "justification": exception.justification
+        })
+        
+        if type(self.graph_store) is ContextGraph:
+            self.graph_store.add_node(
+                node_id=exception.exception_id,
+                node_type="Exception",
+                **metadata
+            )
+            return
+
         query = """
         CREATE (e:Exception {
             exception_id: $exception_id,

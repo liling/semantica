@@ -187,7 +187,7 @@ See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the full per-contributor breakdown 
 | `semantica.visualization` | Interactive and static visualization of KGs, ontologies, embeddings, analytics, and temporal graphs |
 | `semantica.seed` | Seed data management for initial KG construction from CSV, JSON, databases, and APIs |
 | `semantica.core` | Framework orchestration, configuration management, knowledge base construction, plugin system |
-| `semantica.llms` | LLM provider integrations — Groq, OpenAI, HuggingFace, LiteLLM |
+| `semantica.llms` | LLM provider integrations — Groq, OpenAI, Novita AI, HuggingFace, LiteLLM |
 | `semantica.utils` | Shared utilities — logging, validation, exception handling, constants, types, progress tracking |
 
 ---
@@ -680,9 +680,19 @@ ontology = importer.load("context.jsonld")
 
 **LLM Providers**
 - 100+ models via LiteLLM — OpenAI, Anthropic, Cohere, Mistral, Ollama, Azure, AWS Bedrock, and more
+- Novita AI — OpenAI-compatible provider (`deepseek/deepseek-v3.2` and more); configure via `NOVITA_API_KEY`
 
-**AI Frameworks**
-- Complements LangChain, LlamaIndex, AutoGen, CrewAI, Google ADK
+**Agentic Frameworks**
+- Complements LangChain, LlamaIndex, AutoGen, CrewAI, Google ADK, and more
+
+> **Agno — First-Class Integration** `pip install semantica[agno]`
+>
+> Semantica ships a dedicated Agno integration with five ready-to-use components:
+> - **`AgnoContextStore`** — graph-backed agent memory
+> - **`AgnoKnowledgeGraph`** — multi-hop GraphRAG knowledge base
+> - **`AgnoDecisionKit`** — 6 decision-intelligence tools
+> - **`AgnoKGToolkit`** — 7 knowledge-graph pipeline tools
+> - **`AgnoSharedContext`** — shared context graph for multi-agent teams
 
 **Export**
 - RDF: Turtle, JSON-LD, N-Triples, XML · Parquet · ArangoDB AQL

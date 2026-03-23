@@ -21,6 +21,7 @@ from .temporal_model import (
     serialize_temporal_value,
     temporal_structure_to_json_ready,
 )
+from ..reasoning.temporal_reasoning import IntervalRelation, TemporalInterval, TemporalReasoningEngine
 from ..utils.exceptions import ProcessingError, TemporalValidationError
 
 
@@ -101,6 +102,7 @@ class TemporalGraphQuery:
         self.pattern_detector = TemporalPatternDetector(
             **kwargs.get("pattern_detection", {})
         )
+        self.reasoning_engine = TemporalReasoningEngine()
 
     def query_at_time(
         self,
@@ -395,8 +397,13 @@ class TemporalGraphQuery:
         self.logger.info(f"Querying graph in time range: {start_time} to {end_time}")
 
         # Parse times
-        start = self._parse_time(start_time)
-        end = self._parse_time(end_time)
+        normalized_range = self.reasoning_engine.normalize_interval(
+            start_time,
+            end_time,
+            self.temporal_granularity,
+        )
+        start = normalized_range.start
+        end = normalized_range.end if isinstance(normalized_range.end, datetime) else None
 
         # Filter relationships valid in time range
         relationships = []
@@ -701,7 +708,7 @@ class TemporalGraphQuery:
 
     def _parse_time(self, time_value):
         """Parse time value into a UTC-normalized datetime."""
-        if time_value in (TemporalBound.OPEN, TemporalBound.OPEN.value):
+        if time_value in (None, TemporalBound.OPEN, TemporalBound.OPEN.value):
             return None
         try:
             return parse_temporal_value(time_value)
@@ -723,22 +730,7 @@ class TemporalGraphQuery:
 
     def _truncate_to_granularity(self, value: datetime) -> datetime:
         granularity = getattr(self, "temporal_granularity", "second")
-        if granularity == "second":
-            return value.replace(microsecond=0)
-        if granularity == "minute":
-            return value.replace(second=0, microsecond=0)
-        if granularity == "hour":
-            return value.replace(minute=0, second=0, microsecond=0)
-        if granularity == "day":
-            return value.replace(hour=0, minute=0, second=0, microsecond=0)
-        if granularity == "week":
-            start_of_week = value - timedelta(days=value.weekday())
-            return start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
-        if granularity == "month":
-            return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if granularity == "year":
-            return value.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        return value
+        return self.reasoning_engine.normalize_timestamp(value, granularity)
 
     def _get_axis_bounds(self, relationship: Dict[str, Any], axis: str):
         normalized = deserialize_relationship_temporal_fields(relationship)
@@ -750,25 +742,39 @@ class TemporalGraphQuery:
         raise ValueError(f"Unsupported time axis: {axis}")
 
     def _is_point_in_bounds(self, point: datetime, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
-        if start and self._compare_times(point, start) < 0:
-            return False
-        if isinstance(end, datetime) and self._compare_times(point, end) >= 0:
-            return False
-        return True
+        if start is None:
+            start = datetime.min.replace(tzinfo=timezone.utc)
+        return self.reasoning_engine.active_at(
+            TemporalInterval(start=start, end=end or TemporalBound.OPEN),
+            point,
+        )
 
     def _range_overlaps_bounds(self, query_start: datetime, query_end: datetime, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
-        if start and self._compare_times(query_end, start) < 0:
+        if query_end < query_start:
             return False
-        if isinstance(end, datetime) and self._compare_times(query_start, end) > 0:
+        if isinstance(end, datetime) and start is not None and end < start:
             return False
-        return True
+        candidate = TemporalInterval(
+            start=start or datetime.min.replace(tzinfo=timezone.utc),
+            end=end or TemporalBound.OPEN,
+        )
+        query_interval = TemporalInterval(start=query_start, end=query_end)
+        relation = self.reasoning_engine.relation(candidate, query_interval)
+        return relation not in {
+            IntervalRelation.BEFORE,
+            IntervalRelation.AFTER,
+        }
 
     def _range_covered_by_bounds(self, query_start: datetime, query_end: datetime, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
-        if start and self._compare_times(start, query_start) > 0:
+        if query_end < query_start:
             return False
-        if isinstance(end, datetime) and self._compare_times(end, query_end) < 0:
+        if isinstance(end, datetime) and start is not None and end < start:
             return False
-        return True
+        candidate = TemporalInterval(
+            start=start or datetime.min.replace(tzinfo=timezone.utc),
+            end=end or TemporalBound.OPEN,
+        )
+        return self.reasoning_engine.contains(candidate, TemporalInterval(start=query_start, end=query_end))
 
     def _relationship_active_at_time(self, relationship: Dict[str, Any], query_time: datetime, *, time_axis: str) -> bool:
         axes = ["valid", "transaction"] if time_axis == "both" else [time_axis]
@@ -826,12 +832,6 @@ class TemporalGraphQuery:
         return value or datetime.min.replace(tzinfo=timezone.utc)
 
     def _period_floor(self, value: datetime) -> datetime:
-        if self.temporal_granularity == "week":
-            return (value - timedelta(days=value.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        if self.temporal_granularity == "month":
-            return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if self.temporal_granularity == "year":
-            return value.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         return self._truncate_to_granularity(value)
 
     def _next_period(self, value: datetime) -> datetime:

@@ -27,6 +27,7 @@ from .rete_engine import (
 from .sparql_reasoner import SPARQLQueryResult, SPARQLReasoner
 
 from .datalog_reasoner import DatalogReasoner, DatalogFact, DatalogRule
+from .temporal_reasoning import IntervalRelation, TemporalInterval, TemporalReasoningEngine
 
 __all__ = [
     # Reasoner facade
@@ -50,6 +51,9 @@ __all__ = [
     "DatalogReasoner",
     "DatalogFact",
     "DatalogRule",
+    "TemporalInterval",
+    "IntervalRelation",
+    "TemporalReasoningEngine",
     # Explanation
     "ExplanationGenerator",
     "Explanation",

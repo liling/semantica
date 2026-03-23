@@ -127,6 +127,7 @@ from .temporal_query import (
     TemporalVersionManager,
 )
 from .temporal_model import BiTemporalFact, TemporalBound
+from ..reasoning.temporal_reasoning import IntervalRelation, TemporalInterval, TemporalReasoningEngine
 
 __all__ = [
     # Core Classes
@@ -140,6 +141,9 @@ __all__ = [
     "TemporalVersionManager",
     "TemporalBound",
     "BiTemporalFact",
+    "TemporalInterval",
+    "IntervalRelation",
+    "TemporalReasoningEngine",
     "AlgorithmTrackerWithProvenance",
     "ProvenanceTracker",
     # Enhanced Graph Algorithms

@@ -127,3 +127,30 @@ class TestTemporalReasoningEngine:
         assert result["start_time"] == dt("2024-01-01T00:00:00Z")
         assert result["end_time"] == dt("2024-02-29T23:59:59.999999Z")
         assert {rel["id"] for rel in result["relationships"]} == {"jan", "feb"}
+
+    def test_query_time_range_with_open_end_does_not_crash(self):
+        query = TemporalGraphQuery(temporal_granularity="day")
+        graph = {
+            "relationships": [
+                {"id": "open", "source": "A", "target": "B", "type": "rel", "valid_from": "2024-01-10T00:00:00Z", "valid_until": TemporalBound.OPEN},
+            ]
+        }
+
+        result = query.query_time_range(graph, "", "2024-01-01T00:00:00Z", None)
+
+        assert result["end_time"] is TemporalBound.OPEN
+        assert [rel["id"] for rel in result["relationships"]] == ["open"]
+
+    def test_query_at_time_respects_month_granularity(self):
+        query = TemporalGraphQuery(temporal_granularity="month")
+        graph = {
+            "relationships": [
+                {"id": "late-jan", "source": "A", "target": "B", "type": "rel", "valid_from": "2024-01-20T00:00:00Z", "valid_until": "2024-02-10T00:00:00Z"},
+            ]
+        }
+
+        january = query.query_at_time(graph, "", "2024-01-05T00:00:00Z")
+        february = query.query_at_time(graph, "", "2024-02-15T00:00:00Z")
+
+        assert [rel["id"] for rel in january["relationships"]] == ["late-jan"]
+        assert february["relationships"] == []

@@ -21,7 +21,7 @@ from .temporal_model import (
     serialize_temporal_value,
     temporal_structure_to_json_ready,
 )
-from ..reasoning.temporal_reasoning import IntervalRelation, TemporalInterval, TemporalReasoningEngine
+from .temporal_reasoning import IntervalRelation, TemporalInterval, TemporalReasoningEngine
 from ..utils.exceptions import ProcessingError, TemporalValidationError
 
 
@@ -403,7 +403,7 @@ class TemporalGraphQuery:
             self.temporal_granularity,
         )
         start = normalized_range.start
-        end = normalized_range.end if isinstance(normalized_range.end, datetime) else None
+        end = normalized_range.end
 
         # Filter relationships valid in time range
         relationships = []
@@ -747,10 +747,12 @@ class TemporalGraphQuery:
         return self.reasoning_engine.active_at(
             TemporalInterval(start=start, end=end or TemporalBound.OPEN),
             point,
+            granularity=self.temporal_granularity,
         )
 
-    def _range_overlaps_bounds(self, query_start: datetime, query_end: datetime, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
-        if query_end < query_start:
+    def _range_overlaps_bounds(self, query_start: datetime, query_end: datetime | TemporalBound, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
+        query_end_value = datetime.max.replace(tzinfo=timezone.utc) if query_end is TemporalBound.OPEN else query_end
+        if query_end_value < query_start:
             return False
         if isinstance(end, datetime) and start is not None and end < start:
             return False
@@ -765,8 +767,9 @@ class TemporalGraphQuery:
             IntervalRelation.AFTER,
         }
 
-    def _range_covered_by_bounds(self, query_start: datetime, query_end: datetime, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
-        if query_end < query_start:
+    def _range_covered_by_bounds(self, query_start: datetime, query_end: datetime | TemporalBound, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
+        query_end_value = datetime.max.replace(tzinfo=timezone.utc) if query_end is TemporalBound.OPEN else query_end
+        if query_end_value < query_start:
             return False
         if isinstance(end, datetime) and start is not None and end < start:
             return False
@@ -783,14 +786,14 @@ class TemporalGraphQuery:
             for axis in axes
         )
 
-    def _relationship_overlaps_range(self, relationship: Dict[str, Any], start: datetime, end: datetime, *, time_axis: str) -> bool:
+    def _relationship_overlaps_range(self, relationship: Dict[str, Any], start: datetime, end: datetime | TemporalBound, *, time_axis: str) -> bool:
         axes = ["valid", "transaction"] if time_axis == "both" else [time_axis]
         return all(
             self._range_overlaps_bounds(start, end, *self._get_axis_bounds(relationship, axis))
             for axis in axes
         )
 
-    def _relationship_covers_range(self, relationship: Dict[str, Any], start: datetime, end: datetime, *, time_axis: str) -> bool:
+    def _relationship_covers_range(self, relationship: Dict[str, Any], start: datetime, end: datetime | TemporalBound, *, time_axis: str) -> bool:
         axes = ["valid", "transaction"] if time_axis == "both" else [time_axis]
         return all(
             self._range_covered_by_bounds(start, end, *self._get_axis_bounds(relationship, axis))

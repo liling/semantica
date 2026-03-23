@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from semantica.kg.graph_builder import GraphBuilder
 from semantica.kg.graph_analyzer import GraphAnalyzer
 from semantica.kg.temporal_model import TemporalBound, deserialize_relationship_temporal_fields
-from semantica.kg.temporal_query import TemporalConsistencyReport
+from semantica.kg.temporal_query import TemporalConsistencyReport, validate_temporal_consistency
 from semantica.utils.exceptions import TemporalValidationError
 
 class TestGraphBuilder(unittest.TestCase):
@@ -471,6 +471,21 @@ class TestTemporalGraphQuery(unittest.TestCase):
         self.assertEqual(result["num_entities"], 1)
         self.assertEqual(result["num_relationships"], 0)
 
+    def test_query_at_time_treats_valid_until_as_exclusive(self):
+        graph = {
+            "entities": [
+                {"id": "1", "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN},
+                {"id": "2", "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN},
+            ],
+            "relationships": [
+                {"source": "1", "target": "2", "type": "rel", "valid_from": "2020-01-01", "valid_until": "2024-06-01"},
+            ],
+        }
+
+        result = self.query_engine.query_at_time(graph, "", "2024-06-01")
+
+        self.assertEqual(result["num_relationships"], 0)
+
     def test_validate_temporal_consistency_reports_errors_and_warnings(self):
         graph = {
             "entities": [
@@ -511,6 +526,28 @@ class TestTemporalGraphQuery(unittest.TestCase):
         self.assertEqual(report.errors, [])
         self.assertEqual(report.warnings, [])
 
+    def test_validate_temporal_consistency_never_raises_on_invalid_temporal_data(self):
+        graph = {
+            "entities": [{"id": "A", "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN}],
+            "relationships": [
+                {"id": "bad", "source": "A", "target": "A", "type": "rel", "valid_from": "not-a-date", "valid_until": TemporalBound.OPEN},
+            ],
+        }
+
+        report = self.query_engine.validate_temporal_consistency(graph)
+
+        self.assertTrue(any(issue["fact_id"] == "bad" for issue in report.errors))
+
+    def test_module_level_validate_temporal_consistency_function(self):
+        graph = {
+            "entities": [{"id": "A", "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN}],
+            "relationships": [],
+        }
+
+        report = validate_temporal_consistency(graph)
+
+        self.assertIsInstance(report, TemporalConsistencyReport)
+
     def test_query_temporal_pattern_sequence_returns_patterns(self):
         graph = {
             "relationships": [
@@ -539,6 +576,18 @@ class TestTemporalGraphQuery(unittest.TestCase):
 
         self.assertGreaterEqual(result["num_patterns"], 1)
 
+    def test_query_temporal_pattern_sequence_handles_open_ended_relationships(self):
+        graph = {
+            "relationships": [
+                {"id": "s1", "source": "A", "target": "B", "type": "rel", "valid_from": "2024-01-01", "valid_until": TemporalBound.OPEN},
+                {"id": "s2", "source": "B", "target": "C", "type": "rel", "valid_from": "2024-01-03", "valid_until": "2024-01-04"},
+            ]
+        }
+
+        result = self.query_engine.query_temporal_pattern(graph, "sequence")
+
+        self.assertEqual(result["patterns"], [])
+
     def test_query_temporal_pattern_cycle_returns_single_node_cycle(self):
         graph = {
             "relationships": [
@@ -550,6 +599,18 @@ class TestTemporalGraphQuery(unittest.TestCase):
 
         self.assertGreaterEqual(result["num_patterns"], 1)
         self.assertEqual(result["patterns"][0]["pattern_type"], "cycle")
+
+    def test_query_temporal_pattern_cycle_handles_open_ended_relationships(self):
+        graph = {
+            "relationships": [
+                {"id": "c1", "source": "A", "target": "B", "type": "rel", "valid_from": "2024-01-01", "valid_until": TemporalBound.OPEN},
+                {"id": "c2", "source": "B", "target": "A", "type": "rel", "valid_from": "2024-01-02", "valid_until": "2024-01-03"},
+            ]
+        }
+
+        result = self.query_engine.query_temporal_pattern(graph, "cycle")
+
+        self.assertIsInstance(result["patterns"], list)
 
     def test_query_time_range_evolution_buckets_by_granularity(self):
         query_engine = __import__("semantica.kg.temporal_query", fromlist=["TemporalGraphQuery"]).TemporalGraphQuery(
@@ -570,9 +631,10 @@ class TestTemporalGraphQuery(unittest.TestCase):
             temporal_aggregation="evolution",
         )
 
-        self.assertIsInstance(result["relationships"], dict)
-        self.assertIn("2024-01", result["relationships"])
-        self.assertIn("2024-02", result["relationships"])
+        self.assertIsInstance(result["relationships"], list)
+        self.assertIsInstance(result["relationship_buckets"], dict)
+        self.assertIn("2024-01", result["relationship_buckets"])
+        self.assertIn("2024-02", result["relationship_buckets"])
 
     def test_find_temporal_paths_respects_strict_and_loose_causal_ordering(self):
         graph = {
@@ -592,6 +654,21 @@ class TestTemporalGraphQuery(unittest.TestCase):
 
         self.assertEqual(strict_result["num_paths"], 0)
         self.assertEqual(loose_result["num_paths"], 1)
+
+    def test_reconstruct_at_time_preserves_relationships_with_mixed_id_types(self):
+        graph = {
+            "entities": [
+                {"id": 1, "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN},
+                {"id": 2, "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN},
+            ],
+            "relationships": [
+                {"source": "1", "target": "2", "type": "rel", "valid_from": "2020-01-01", "valid_until": TemporalBound.OPEN},
+            ],
+        }
+
+        reconstructed = self.query_engine.reconstruct_at_time(graph, "2024-01-01")
+
+        self.assertEqual(len(reconstructed["relationships"]), 1)
 
 if __name__ == "__main__":
     unittest.main()

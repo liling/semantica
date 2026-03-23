@@ -196,8 +196,8 @@ class TemporalGraphQuery:
         for relationship in graph.get("relationships", []):
             if not self._relationship_active_at_time(relationship, query_time, time_axis=time_axis):
                 continue
-            source = relationship.get("source")
-            target = relationship.get("target")
+            source = self._entity_id({"id": relationship.get("source")})
+            target = self._entity_id({"id": relationship.get("target")})
             if source not in entity_index or target not in entity_index:
                 continue
             relationships.append(copy.deepcopy(relationship))
@@ -226,7 +226,19 @@ class TemporalGraphQuery:
                 )
             ].append(relationship)
 
-            start, end = self._get_axis_bounds(relationship, "valid")
+            try:
+                start, end = self._get_axis_bounds(relationship, "valid")
+            except TemporalValidationError as exc:
+                errors.append(
+                    asdict(
+                        TemporalConsistencyIssue(
+                            message=f"Unable to parse temporal fields: {exc}",
+                            fact_id=rel_id,
+                            issue_type="invalid_temporal_fields",
+                        )
+                    )
+                )
+                continue
             if start and isinstance(end, datetime) and self._compare_times(start, end) > 0:
                 errors.append(
                     asdict(
@@ -251,7 +263,20 @@ class TemporalGraphQuery:
                         )
                     )
                     continue
-                if not self._window_within_entity_lifetime(entity, start, end):
+                try:
+                    within_lifetime = self._window_within_entity_lifetime(entity, start, end)
+                except TemporalValidationError as exc:
+                    errors.append(
+                        asdict(
+                            TemporalConsistencyIssue(
+                                message=f"Unable to parse {endpoint} entity lifetime: {exc}",
+                                fact_id=rel_id,
+                                issue_type=f"invalid_{endpoint}_temporal_fields",
+                            )
+                        )
+                    )
+                    continue
+                if not within_lifetime:
                     errors.append(
                         asdict(
                             TemporalConsistencyIssue(
@@ -262,15 +287,31 @@ class TemporalGraphQuery:
                         )
                     )
         for relationships in rel_groups.values():
+            safe_relationships = []
+            for relationship in relationships:
+                rel_id = relationship.get("id") or self._relationship_key(relationship)
+                try:
+                    start, end = self._get_axis_bounds(relationship, "valid")
+                except TemporalValidationError as exc:
+                    errors.append(
+                        asdict(
+                            TemporalConsistencyIssue(
+                                message=f"Unable to parse temporal fields: {exc}",
+                                fact_id=rel_id,
+                                issue_type="invalid_temporal_fields",
+                            )
+                        )
+                    )
+                    continue
+                safe_relationships.append((relationship, start, end))
             ordered = sorted(
-                relationships,
-                key=lambda rel: self._sort_key(self._get_axis_bounds(rel, "valid")[0]),
+                safe_relationships,
+                key=lambda item: self._sort_key(item[1]),
             )
-            for index, current in enumerate(ordered):
+            for index, (current, current_start, current_end) in enumerate(ordered):
                 current_id = current.get("id") or self._relationship_key(current)
-                current_start, current_end = self._get_axis_bounds(current, "valid")
                 if index > 0:
-                    previous_start, previous_end = self._get_axis_bounds(ordered[index - 1], "valid")
+                    _, previous_start, previous_end = ordered[index - 1]
                     if self._range_overlaps_bounds(
                         current_start or datetime.min.replace(tzinfo=timezone.utc),
                         current_end if isinstance(current_end, datetime) else datetime.max.replace(tzinfo=timezone.utc),
@@ -359,6 +400,7 @@ class TemporalGraphQuery:
 
         # Filter relationships valid in time range
         relationships = []
+        relationship_buckets = None
         if "relationships" in graph:
             for rel in graph.get("relationships", []):
                 if self._relationship_overlaps_range(
@@ -379,13 +421,14 @@ class TemporalGraphQuery:
             ]
         elif temporal_aggregation == "evolution":
             # Group by time periods
-            relationships = self._group_by_time_periods(relationships, start, end)
+            relationship_buckets = self._group_by_time_periods(relationships, start, end)
 
         return {
             "query": query,
             "start_time": start,
             "end_time": end,
             "relationships": relationships,
+            "relationship_buckets": relationship_buckets,
             "num_relationships": len(relationships),
             "aggregation": temporal_aggregation,
         }
@@ -709,7 +752,7 @@ class TemporalGraphQuery:
     def _is_point_in_bounds(self, point: datetime, start: Optional[datetime], end: Optional[datetime | TemporalBound]) -> bool:
         if start and self._compare_times(point, start) < 0:
             return False
-        if isinstance(end, datetime) and self._compare_times(point, end) > 0:
+        if isinstance(end, datetime) and self._compare_times(point, end) >= 0:
             return False
         return True
 
@@ -949,6 +992,9 @@ class TemporalPatternDetector:
 
     def _find_sequences(self, relationships, min_frequency):
         """Find sequential patterns."""
+        # Pattern output design:
+        # - sequences return dicts with pattern_type/signature/frequency/occurrences
+        # - each occurrence stores ordered nodes, ordered edges, and start/end timestamps
         gap_tolerance = self._resolve_gap_tolerance()
         outgoing: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for relationship in relationships:
@@ -961,11 +1007,13 @@ class TemporalPatternDetector:
             while True:
                 next_candidates = []
                 _, current_end = self._get_axis_bounds(current)
+                if current_end is TemporalBound.OPEN:
+                    break
                 for candidate in outgoing.get(current.get("target"), []):
                     if candidate is current:
                         continue
                     candidate_start, _ = self._get_axis_bounds(candidate)
-                    if current_end is None or candidate_start is None:
+                    if not isinstance(current_end, datetime) or candidate_start is None:
                         continue
                     gap = candidate_start - current_end
                     if gap < timedelta(0) or gap > gap_tolerance:
@@ -1005,6 +1053,9 @@ class TemporalPatternDetector:
 
     def _find_cycles(self, relationships, min_frequency):
         """Find cyclic patterns."""
+        # Pattern output design mirrors sequences:
+        # - cycles return pattern_type/signature/frequency/occurrences
+        # - each occurrence records the ordered cycle nodes, edges, and time span
         outgoing: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for relationship in relationships:
             outgoing[relationship.get("source")].append(relationship)
@@ -1033,7 +1084,7 @@ class TemporalPatternDetector:
                 _, current_end = self._get_axis_bounds(current)
                 for candidate in outgoing.get(visited_nodes[-1], []):
                     candidate_start, _ = self._get_axis_bounds(candidate)
-                    if current_end and candidate_start and self._compare_times(candidate_start, current_end) < 0:
+                    if isinstance(current_end, datetime) and candidate_start and self._compare_times(candidate_start, current_end) < 0:
                         continue
                     next_candidates.append((self._sort_key(candidate_start), candidate))
                 if not next_candidates:
@@ -1080,6 +1131,9 @@ class TemporalPatternDetector:
         if time1 is None or time2 is None:
             return 0
         return (time1 > time2) - (time1 < time2)
+
+    def _sort_key(self, value: Optional[datetime]) -> datetime:
+        return value or datetime.min.replace(tzinfo=timezone.utc)
 
 
 class TemporalVersionManager:
@@ -1456,7 +1510,7 @@ class TemporalVersionManager:
         """
         from ..change_management import verify_checksum
         return verify_checksum(snapshot)
-    
+
     def _compute_detailed_diff(self, version1: Dict[str, Any], version2: Dict[str, Any]) -> Dict[str, Any]:
         """
         Compute detailed entity and relationship differences between versions.
@@ -1619,3 +1673,8 @@ class TemporalVersionManager:
                 changes[key] = {"from": val1, "to": val2}
         
         return changes
+
+
+def validate_temporal_consistency(graph: Any) -> TemporalConsistencyReport:
+    """Module-level validator entry point required by the temporal query API."""
+    return TemporalGraphQuery().validate_temporal_consistency(graph)

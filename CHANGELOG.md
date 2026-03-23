@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Deterministic Temporal Reasoning Engine** (PR #398 by @KaifAhmad1, implemented and follow-up fixes by OpenAI Codex):
+  - Added `semantica.kg.temporal_reasoning` as the single source of truth for deterministic, LLM-free temporal reasoning with an explicit zero-LLM module contract
+  - Implemented `TemporalInterval`, full Allen interval algebra via `IntervalRelation`, and `TemporalReasoningEngine`
+  - Added deterministic helpers for interval overlap/containment checks, open-ended activity checks, interval merging, gap analysis, coverage calculation, timelines, retroactive coverage, and temporal normalization
+  - Integrated temporal query interval logic with the reasoning engine in `TemporalGraphQuery`
+  - Preserved `semantica.reasoning` access via re-exports without making it the canonical implementation source
+  - Fixed open-ended `query_time_range(..., end_time=None)` handling so temporal range queries no longer crash on `TemporalBound.OPEN`
+  - Restored `temporal_granularity` behavior for point-in-time checks in `query_at_time()`
+  - Eliminated the `semantica.reasoning` / `semantica.kg` circular import risk introduced during the initial module move
+  - Added regression coverage for all 13 Allen relations, open-ended intervals, month-granularity point queries, open-ended range queries, retroactive coverage, and normalization idempotence
+
 - **Temporal Query Engine: Point-in-Time Correctness** (PR #397 by @KaifAhmad1, implemented and follow-up fixes by OpenAI Codex):
   - Added `reconstruct_at_time(graph, at_time)` to `TemporalGraphQuery` to build a self-consistent point-in-time subgraph without mutating the input graph
   - Updated `query_at_time()` to use point-in-time reconstruction internally so returned subgraphs exclude dangling edges when entity lifetimes are available

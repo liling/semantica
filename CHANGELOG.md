@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Core Temporal Data Model Overhaul** (PR #396 by @KaifAhmad1, implemented and follow-up fixes by OpenAI Codex):
+  - Added `semantica.kg.temporal_model` with shared helpers for parsing, normalizing, serializing, and deserializing temporal relationship fields
+  - Exported `TemporalBound` and `BiTemporalFact` from `semantica.kg` for backward-compatible temporal relationship handling
+  - Updated `TemporalGraphQuery` to use shared temporal parsing/model helpers instead of ad hoc string handling
+  - Added support for `valid`, `transaction`, and `both` time axes in temporal query filtering
+  - Standardized temporal normalization on `timezone.utc` for better cross-version portability
+  - Added `TemporalValidationError` to utils exports and made invalid temporal inputs consistently raise it
+  - Added history-preserving temporal revisions in `TemporalVersionManager.apply_revision()` with provenance metadata and supersession semantics
+  - Added safer snapshot persistence by serializing revision metadata before storage and surfacing storage failures as `ProcessingError`
+  - **Follow-up fixes applied in the same PR**:
+    - Added a default factory for `BiTemporalFact.recorded_at` and preserved legacy transaction-axis behavior by falling back to `valid_from` when `recorded_at` is missing
+    - Treated `TemporalBound.OPEN` as an unbounded value in shared query parsing so open-ended facts do not fail in public APIs like `analyze_evolution()` and path filtering
+    - Recomputed snapshot checksums before persisting revised snapshots and any original snapshot inserted during revision flow
+    - Replaced second-based revision suffixes with collision-resistant revision IDs/labels to avoid duplicate save failures under rapid revisions
+    - Removed warning spam caused by canonical serialized open bounds represented as `None`
+  - Added and expanded regression coverage for UTC normalization, transaction-axis queries, open-ended bounds, revision integrity, checksum verification, and collision-resistant revision identifiers
+
 - **Audit Trail, Named Tags, and Rollback Protection** (PR #394 by @ZohaibHassan16, reviewed by @KaifAhmad1, follow-up fixes by OpenAI Codex):
   - Added mutation-level audit tracking for `ContextGraph` node and edge changes via `TemporalVersionManager.attach_to_graph()` and persistent mutation logging backends
   - Added named version tags in both in-memory and SQLite storage so human-readable tags can point to saved snapshots

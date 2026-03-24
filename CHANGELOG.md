@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fix: OllamaProvider ignores `base_url`** (PR #408 by @AlexeyMyslin, fixed by @KaifAhmad1):
+  - `OllamaProvider._init_client()` was assigning the raw `ollama` module to `self.client` instead of instantiating `ollama.Client(host=self.base_url)`, causing all requests to silently hit `localhost:11434` regardless of the `base_url` passed by the user
+  - Fixed by replacing `self.client = ollama` with `self.client = ollama.Client(host=self.base_url)` — remote Ollama servers (e.g. `http://192.168.1.3:11434`) are now reachable
+  - Added 3 regression tests: default URL forwarded as host, custom URL forwarded as host, and guard ensuring `self.client` is never the raw module
+
 - **Temporal Awareness in Context Graph** (PR #399 by @KaifAhmad1):
   - Added `valid_from` and `valid_until` fields to the `Decision` dataclass and `record_decision()` — decisions now carry explicit validity windows; superseded decisions remain in the graph (history is immutable)
   - Added `include_superseded=False` and `as_of=None` parameters to `find_precedents_by_scenario()` — defaults exclude expired decisions; `as_of` enables point-in-time precedent queries

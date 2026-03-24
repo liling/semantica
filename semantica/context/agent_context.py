@@ -1828,7 +1828,13 @@ class AgentContext:
             raise KeyError(f"Unknown checkpoint label: {label}")
 
         if self._temporal_version_manager is None:
-            self._temporal_version_manager = TemporalVersionManager()
+            try:
+                self._temporal_version_manager = TemporalVersionManager()
+            except Exception as exc:
+                raise RuntimeError(
+                    "flush_checkpoint requires a TemporalVersionManager. "
+                    "Pass one via temporal_version_manager= at construction time."
+                ) from exc
 
         return self._temporal_version_manager.create_snapshot(
             self._checkpoints[label],
@@ -1840,11 +1846,11 @@ class AgentContext:
     def _capture_checkpoint_state(self) -> Dict[str, Any]:
         """Capture a serializable snapshot of the current graph state."""
         if self.knowledge_graph and hasattr(self.knowledge_graph, "state_at"):
-            return self.knowledge_graph.state_at(datetime.now())
+            return self.knowledge_graph.state_at(datetime.utcnow())
         if self.knowledge_graph and hasattr(self.knowledge_graph, "to_dict"):
             graph_dict = self.knowledge_graph.to_dict()
             return {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.utcnow().isoformat(),
                 "nodes": graph_dict.get("nodes", []),
                 "edges": graph_dict.get("edges", []),
                 "entities": graph_dict.get("nodes", []),
@@ -1860,7 +1866,7 @@ class AgentContext:
                 ],
             }
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "nodes": [],
             "edges": [],
             "entities": [],

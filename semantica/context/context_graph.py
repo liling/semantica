@@ -155,7 +155,9 @@ def _normalize_temporal_input(value: Optional[Union[str, int, float, datetime]])
         return datetime.fromtimestamp(value, tz=timezone.utc).replace(tzinfo=None).isoformat()
     if isinstance(value, str):
         parsed = _parse_iso_dt(value)
-        return parsed.isoformat() if parsed is not None else value
+        if parsed is None:
+            raise ValueError(f"Temporal value {value!r} is not a valid ISO datetime string")
+        return parsed.isoformat()
     raise ValueError("Temporal values must be datetime, epoch seconds, ISO strings, or None")
 
 
@@ -1545,7 +1547,7 @@ class ContextGraph:
             target_id=target_decision_id,
             edge_type=relationship_type,
             weight=1.0,
-            metadata={"recorded_at": datetime.now().isoformat()},
+            metadata={"recorded_at": datetime.utcnow().isoformat()},
         )
         self._add_internal_edge(edge)
 
@@ -2055,7 +2057,7 @@ class ContextGraph:
             "entities": entities,
             "decision_maker": decision_maker,
             "timestamp": timestamp,
-            "recorded_at": datetime.now().isoformat(),
+            "recorded_at": datetime.utcnow().isoformat(),
             "valid_from": normalized_valid_from,
             "valid_until": normalized_valid_until,
             "metadata": metadata or {},

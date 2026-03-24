@@ -165,7 +165,7 @@ class CausalChainAnalyzer:
         if direction not in ["upstream", "downstream"]:
             raise ValueError("Direction must be 'upstream' or 'downstream'")
         if not (1 <= max_depth <= 100):
-            raise ValueError("max_depth must be between 1 and 20")
+            raise ValueError("max_depth must be between 1 and 100")
 
         if hasattr(self.graph_store, "nodes") and hasattr(self.graph_store, "edges"):
             return self._trace_at_time_from_context_graph(event_id, cutoff, direction, max_depth)
@@ -181,7 +181,7 @@ class CausalChainAnalyzer:
             """
             results = self.graph_store.execute_query(
                 query,
-                {"decision_id": event_id, "at_time": cutoff.isoformat()},
+                {"decision_id": event_id, "at_time": cutoff.strftime("%Y-%m-%dT%H:%M:%S") + "Z"},
             )
             records = self._extract_records(results)
             decisions: List[Decision] = []

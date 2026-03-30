@@ -255,3 +255,20 @@ class AnnotationResponse(BaseModel):
     tags: List[str] = Field(default_factory=list)
     visibility: str = "public"
     created_at: str = ""
+
+class VocabularyScheme(BaseModel):
+    """ A SKOS Concept Scheme (Vocabulary / Ontology)."""
+    
+    uri: str
+    label: str
+    description: Optional[str] = None
+    
+class ConceptNode(BaseModel):
+    """ A SKOS Concept, nested hierarchically."""
+    
+    uri: str
+    pref_label: str
+    alt_labels: List[str] = Field(default_factory=list)
+    children: Optional[List['ConceptNode']] = None
+    
+    

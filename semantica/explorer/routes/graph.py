@@ -44,7 +44,7 @@ async def list_nodes(
     type: Optional[str] = Query(None, description="Filter by node type"),
     search: Optional[str] = Query(None, description="Keyword search over node content"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=5000),
     session: GraphSession = Depends(get_session),
 ):
     """List nodes with optional filtering and pagination."""

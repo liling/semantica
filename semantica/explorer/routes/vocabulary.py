@@ -114,11 +114,13 @@ async def get_hierarchy(
         if src in node_map and tgt in node_map:
             if etype == "skos:broader":
                 # Source is narrower (child), Target is broader (parent)
-                parent_to_children[tgt].append(src)
+                if src not in parent_to_children[tgt]:  
+                    parent_to_children[tgt].append(src)
                 has_parent.add(src)
             elif etype == "skos:narrower":
                 # Source is broader (parent), Target is narrower (child)
-                parent_to_children[src].append(tgt)
+                if tgt not in parent_to_children[src]: 
+                    parent_to_children[src].append(tgt)
                 has_parent.add(tgt)
 
     # Assemble nested tree — cycle-safe via visited set.

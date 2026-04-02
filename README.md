@@ -354,7 +354,7 @@ from semantica.context import AgentContext, AgentMemory
 from semantica.vector_store import VectorStore
 
 context = AgentContext(
-    vector_store=VectorStore(backend="faiss", dimension=768),
+    vector_store=VectorStore(backend="inmemory"),
     knowledge_graph=ContextGraph(advanced_analytics=True),
     decision_tracking=True,
     graph_expansion=True,

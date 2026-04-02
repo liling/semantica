@@ -275,7 +275,7 @@ print(f"Python importance score: {importance.get('degree', 0)}")
 |--------|-------------|------------|
 | `add_node(node_id, node_type, properties)` | Add concepts to remember | Build knowledge base |
 | `add_edge(source, target, relation)` | Connect related concepts | Show relationships |
-| `add_decision(category, scenario, reasoning, outcome, confidence, ...)` | Record decisions | Track choices and learn |
+| `add_decision(decision)` or `add_decision(category, scenario, reasoning, outcome, ...)` | Record decisions | Track choices and learn |
 | `add_decision_simple(category, scenario, reasoning, outcome, confidence, ...)` | Easy decision recording | Quick decision tracking |
 | `find_precedents(decision_id, limit)` | Find precedents by ID | Get connected decisions |
 | `find_precedents_by_scenario(scenario, category, ...)` | Find similar decisions | Make consistent choices |

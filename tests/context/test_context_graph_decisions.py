@@ -49,6 +49,38 @@ class TestContextGraphDecisions:
         assert node.properties["confidence"] == sample_decision.confidence
         assert node.properties["decision_maker"] == sample_decision.decision_maker
     
+    def test_add_decision_kwargs_form(self, context_graph):
+        """add_decision() accepts kwargs directly (no Decision object required)."""
+        decision_id = context_graph.add_decision(
+            category="loan_approval",
+            scenario="Mortgage application — 780 credit score",
+            reasoning="Strong credit history, low DTI",
+            outcome="approved",
+            confidence=0.95,
+        )
+
+        assert isinstance(decision_id, str)
+        assert len(decision_id) > 0
+        node = context_graph.nodes[decision_id]
+        assert node.node_type in ("Decision", "decision")
+        assert node.properties["category"] == "loan_approval"
+        assert node.properties["outcome"] == "approved"
+        assert node.properties["confidence"] == 0.95
+
+    def test_add_decision_kwargs_and_object_both_return_id(self, context_graph, sample_decision):
+        """Both call forms return a non-empty decision ID string."""
+        id_from_object = context_graph.add_decision(sample_decision)
+        id_from_kwargs = context_graph.add_decision(
+            category="test",
+            scenario="test scenario",
+            reasoning="test reasoning",
+            outcome="approved",
+            confidence=0.8,
+        )
+
+        assert isinstance(id_from_object, str) and len(id_from_object) > 0
+        assert isinstance(id_from_kwargs, str) and len(id_from_kwargs) > 0
+
     def test_add_decision_with_embeddings(self, context_graph):
         """Test adding decision with embeddings."""
         decision = Decision(

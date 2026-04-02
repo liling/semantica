@@ -39,6 +39,24 @@ def test_agent_context_minimal_decisions_and_chain():
     assert len(chain) >= 1
 
 
+def test_agent_context_inmemory_store_and_retrieve():
+    """VectorStore(backend="inmemory") stores memories without faiss-cpu."""
+    vs = VectorStore(backend="inmemory")
+    ctx = AgentContext(
+        vector_store=vs,
+        knowledge_graph=ContextGraph(),
+        decision_tracking=True,
+        kg_algorithms=False,
+        vector_store_features=False,
+    )
+    memory_id = ctx.store(
+        "GPT-4 outperforms GPT-3.5 on reasoning benchmarks by 40%",
+        conversation_id="test_session",
+    )
+    assert isinstance(memory_id, str)
+    assert len(memory_id) > 0
+
+
 def test_agent_context_policy_engine_with_graph_backend():
     vs = VectorStore(backend="inmemory", dimension=64)
     graph = ContextGraph()

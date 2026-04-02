@@ -1478,25 +1478,85 @@ class ContextGraph:
         }
 
     # Decision Support Methods
-    def add_decision(self, decision: "Decision") -> None:
+    def add_decision(
+        self,
+        decision: "Decision" = None,
+        *,
+        category: str = None,
+        scenario: str = None,
+        reasoning: str = None,
+        outcome: str = None,
+        confidence: float = 0.5,
+        entities: Optional[List[str]] = None,
+        decision_maker: Optional[str] = "system",
+        valid_from=None,
+        valid_until=None,
+        **kwargs,
+    ) -> str:
         """
         Add decision node to graph.
-        
+
+        Accepts either a Decision object or keyword arguments:
+
+            # From a Decision object
+            graph.add_decision(Decision(category="x", scenario="y", ...))
+
+            # From keyword arguments (convenience form)
+            graph.add_decision(category="x", scenario="y", reasoning="z",
+                               outcome="o", confidence=0.9)
+
         Args:
-            decision: Decision object to add
+            decision: Decision object to add (mutually exclusive with kwargs)
+            category: Decision category
+            scenario: Decision scenario description
+            reasoning: Reasoning behind the decision
+            outcome: Decision outcome
+            confidence: Confidence score (0.0–1.0)
+            entities: Related entity labels
+            decision_maker: Who made the decision
+            valid_from: Start of validity window (ISO string or datetime)
+            valid_until: End of validity window (ISO string or datetime)
+            **kwargs: Extra metadata stored on the decision node
+
+        Returns:
+            Decision ID
         """
         from .decision_models import Decision
-        
+
+        if decision is not None and (
+            any(v is not None for v in (
+                category, scenario, reasoning, outcome, entities, valid_from, valid_until,
+            )) or kwargs
+        ):
+            raise ValueError(
+                "Pass either a Decision object or keyword arguments, not both."
+            )
+
+        if decision is None:
+            # Build from kwargs — delegate to record_decision which handles ID gen
+            return self.record_decision(
+                category=category,
+                scenario=scenario,
+                reasoning=reasoning,
+                outcome=outcome,
+                confidence=confidence,
+                entities=entities,
+                decision_maker=decision_maker,
+                valid_from=valid_from,
+                valid_until=valid_until,
+                metadata=kwargs,
+            )
+
         # Handle empty decision ID by generating UUID for both None and empty string
         # This ensures consistent behavior with Decision model's __post_init__ method
         node_id = decision.decision_id if decision.decision_id else str(uuid.uuid4())
-        
+
         # Handle None metadata
         metadata = decision.metadata or {}
-        
+
         # Normalize timestamp to ensure consistent storage format
         normalized_timestamp = self._normalize_timestamp(decision.timestamp)
-        
+
         node = ContextNode(
             node_id=node_id,
             node_type="Decision",
@@ -1516,6 +1576,7 @@ class ContextGraph:
             valid_until=decision.valid_until,
         )
         self._add_internal_node(node)
+        return node_id
 
     def add_causal_relationship(
         self,

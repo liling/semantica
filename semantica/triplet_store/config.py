@@ -109,10 +109,13 @@ class TripletStoreConfig:
         """Load configuration from environment variables."""
         env_mappings = {
             "TRIPLET_STORE_DEFAULT_STORE": "default_store",
+            "TRIPLET_STORE_DEFAULT_GRAPH": "default_graph",
+            "TRIPLET_STORE_DEFAULT_NAMED_GRAPHS": "default_graphs",
             "TRIPLET_STORE_BATCH_SIZE": "batch_size",
             "TRIPLET_STORE_ENABLE_CACHING": "enable_caching",
             "TRIPLET_STORE_CACHE_SIZE": "cache_size",
             "TRIPLET_STORE_ENABLE_OPTIMIZATION": "enable_optimization",
+            "TRIPLET_STORE_ENABLE_NAMED_GRAPHS": "enable_named_graphs",
             "TRIPLET_STORE_MAX_RETRIES": "max_retries",
             "TRIPLET_STORE_RETRY_DELAY": "retry_delay",
             "TRIPLET_STORE_TIMEOUT": "timeout",
@@ -139,6 +142,19 @@ class TripletStoreConfig:
                         "yes",
                         "on",
                     ]
+                elif config_key == "enable_named_graphs":
+                    self._config[config_key] = value.lower() in [
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    ]
+                elif config_key == "default_graphs":
+                    self._config[config_key] = [
+                        graph_uri.strip()
+                        for graph_uri in value.split(",")
+                        if graph_uri.strip()
+                    ]
                 elif config_key == "retry_delay":
                     try:
                         self._config[config_key] = float(value)
@@ -153,10 +169,13 @@ class TripletStoreConfig:
         """Set default configuration values."""
         defaults = {
             "default_store": None,
+            "default_graph": None,
+            "default_graphs": [],
             "batch_size": 1000,
             "enable_caching": True,
             "cache_size": 1000,
             "enable_optimization": True,
+            "enable_named_graphs": True,
             "max_retries": 3,
             "retry_delay": 1.0,
             "timeout": 30,

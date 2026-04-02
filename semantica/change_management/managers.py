@@ -388,7 +388,10 @@ class TemporalVersionManager(BaseVersionManager):
                 # Clean up the actual graph if provided
                 if triplet_store and graph_uri:
                     try:
-                        triplet_store.execute_query(f"DROP SILENT GRAPH {graph_uri}")
+                        safe_graph_uri = str(graph_uri).strip().strip("<>")
+                        triplet_store.execute_query(
+                            f"DROP SILENT GRAPH <{safe_graph_uri}>"
+                        )
                         self.logger.info(f"Dropped obsolete graph {graph_uri} from store")
                     except Exception as e:
                         self.logger.warning(f"Failed to drop graph {graph_uri} during pruning: {e}")

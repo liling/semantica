@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Named Graph Support: Review Follow-up Fixes** (PR #432 by @Sameer6305, follow-up patch by @KaifAhmad1):
+  - Fixed `enable_named_graphs` handling so `TripletStore.execute_query()` now forwards `supports_named_graphs=False` when named-graph support is disabled in config.
+  - Fixed duplicate dataset clause behavior in `QueryEngine.prepare_query()` so the same URI is not emitted as both `FROM <...>` and `FROM NAMED <...>`.
+  - Added backward-compatible config alias support for `default_graph_uri` alongside existing `default_graph`.
+  - Hardened graph URI handling in version-pruning `DROP SILENT GRAPH` updates by percent-encoding unsafe characters before SPARQL interpolation.
+  - Added focused regression tests covering config-flag enforcement, duplicate clause prevention, `default_graph_uri` alias behavior, and pruning-path URI sanitization.
+  - Verified with targeted feature tests: `tests/triplet_store/test_triplet_store.py` and `tests/change_management/test_managers.py` (54 passed).
+
 - **ContextGraph Pagination & Edge Integrity Fixes** (PR #431 by @ZohaibHassan16, reviewed and patched by @KaifAhmad1):
   - **O(N) pagination bug** (`semantica/context/context_graph.py`): `find_nodes` and `find_edges` previously materialised the entire graph into a list before slicing — on a 50k-node / 100k-edge graph this allocated up to 2.5 million dicts per paginated request, starving the asyncio event loop and producing 502 Bad Gateway timeouts from the Vite proxy. Both methods now use generator expressions consumed via `itertools.islice(gen, skip, skip + limit)`, reducing time and space complexity from O(N) to O(limit) for the hot path.
   - **Ghost-node / "Nothing → Nothing" edge bug**: `add_edges` previously only accepted the `"source_id"` / `"target_id"` key names; edges serialised with `"source"` / `"target"` (the format emitted by `find_edges`) silently produced `None → None` edges that crashed the frontend physics engine. `add_edges` now accepts both naming conventions (`edge.get("source_id") or edge.get("source")`). A `continue` guard rejects any edge still missing either endpoint after the dual-key lookup.

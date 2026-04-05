@@ -68,9 +68,7 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def generic_error_handler(request: Request, exc: Exception):
-        # Let FastAPI's built-in HTTPException handler take precedence so that
-        # responses from dependency injection (e.g. 503 from get_session) are
-        # not swallowed and converted to 500.
+
         if isinstance(exc, HTTPException):
             raise exc
         return JSONResponse(
@@ -85,6 +83,8 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
     from .routes.enrich import router as enrich_router
     from .routes.export_import import router as export_import_router
     from .routes.annotations import router as annotations_router
+    from .routes.sparql import router as sparql_router
+    from .routes.provenance import router as provenance_router
 
     app.include_router(graph_router)
     app.include_router(analytics_router)
@@ -93,6 +93,8 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
     app.include_router(enrich_router)
     app.include_router(export_import_router)
     app.include_router(annotations_router)
+    app.include_router(sparql_router)
+    app.include_router(provenance_router)
 
     from fastapi import WebSocket, WebSocketDisconnect
 

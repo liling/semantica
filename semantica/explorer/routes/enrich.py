@@ -16,6 +16,8 @@ from ..schemas import (
     LinkPredictionResponse,
     ReasoningRequest,
     ReasoningResponse,
+    MergeRequest,
+    MergeResponse,
 )
 from ..session import GraphSession
 
@@ -68,18 +70,13 @@ async def predict_links(
     nodes, _ = await asyncio.to_thread(session.get_nodes, skip=0, limit=999_999)
     edges, _ = await asyncio.to_thread(session.get_edges, skip=0, limit=999_999)
 
-    # Pre-compute already-connected node IDs so we skip them.
-    # (LinkPredictor._edge_exists returns False for ContextGraph since it has no
-    # has_edge/get_edge method, so we handle exclusion here instead.)
+
     existing_neighbours = {
         e.get("target") for e in edges if e.get("source") == body.node_id
     } | {
         e.get("source") for e in edges if e.get("target") == body.node_id
     }
 
-    # Score each candidate via score_link (which works with ContextGraph because
-    # it falls back to has_node / get_neighbors).
-    # Run in a thread so the CPU-bound scoring loop never blocks the event loop.
     def _score_all() -> list:
         results = []
         for n in nodes:
@@ -115,8 +112,6 @@ async def detect_duplicates(
         from ...deduplication import DuplicateDetector
 
         detector = DuplicateDetector()
-        # Use asyncio.to_thread — get_nodes acquires an RLock and must not block
-        # the event loop.
         nodes, _ = await asyncio.to_thread(session.get_nodes, skip=0, limit=999_999)
 
         entities = [
@@ -173,3 +168,60 @@ def _safe_dict(obj) -> dict:
     if hasattr(obj, "__dict__"):
         return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
     return {"value": str(obj)}
+
+@router.post("/api/enrich/merge", response_model=MergeResponse)
+async def merge_nodes(
+    body: MergeRequest,
+    session: GraphSession = Depends(get_session),
+):
+    """Merge duplicate nodes into a primary node."""
+    primary_id = body.primary_id
+    duplicate_ids = body.duplicate_ids
+    
+    if primary_id not in session.graph:
+        raise ValueError(f"Primary node {primary_id} not found")
+
+    edges_updated = 0
+    removed_ids = []
+
+    # Get primary node attributes
+    primary_attrs = session.graph.nodes[primary_id]
+
+    for dup_id in duplicate_ids:
+        if dup_id not in session.graph or dup_id == primary_id:
+            continue
+            
+        dup_attrs = session.graph.nodes[dup_id]
+     
+        primary_props = primary_attrs.setdefault("properties", {})
+        dup_props = dup_attrs.get("properties", {})
+        
+        for k, v in dup_props.items():
+            if k not in primary_props:
+                primary_props[k] = v
+
+
+        edges_to_add = []
+        edges_to_remove = []
+        for u, v, attrs in session.graph.edges(dup_id, data=True):
+            edges_to_remove.append((u, v))
+            new_u = primary_id if u == dup_id else u
+            new_v = primary_id if v == dup_id else v
+            if new_u != new_v and not session.graph.has_edge(new_u, new_v):
+                edges_to_add.append((new_u, new_v, attrs))
+
+        for u, v in edges_to_remove:
+            session.graph.remove_edge(u, v)
+
+        for u, v, attrs in edges_to_add:
+            session.graph.add_edge(u, v, **attrs)
+            edges_updated += 1
+            
+        session.graph.remove_node(dup_id)
+        removed_ids.append(dup_id)
+
+    return MergeResponse(
+        merged_into=primary_id,
+        removed_ids=removed_ids,
+        edges_updated=edges_updated
+    )

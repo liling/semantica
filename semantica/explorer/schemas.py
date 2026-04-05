@@ -237,6 +237,18 @@ class ExportResponse(BaseModel):
     size_bytes: int = 0
 
 
+class ImportResponse(BaseModel):
+    """Response after successful import."""
+    nodes_imported: int
+    edges_imported: int
+    message: str = "Import successful"
+
+class StandardMessageResponse(BaseModel):
+    """Standard generic success/error response."""
+    status: str
+    message: str
+
+
 
 
 class AnnotationCreate(BaseModel):
@@ -270,5 +282,14 @@ class ConceptNode(BaseModel):
     pref_label: str
     alt_labels: List[str] = Field(default_factory=list)
     children: Optional[List['ConceptNode']] = None
-    
-    
+
+class MergeRequest(BaseModel):
+    """Merge duplicate entities request."""
+    primary_id: str
+    duplicate_ids: List[str]
+
+class MergeResponse(BaseModel):
+    """Merge duplicate entities response."""
+    merged_into: str
+    removed_ids: List[str]
+    edges_updated: int

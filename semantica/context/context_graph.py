@@ -132,15 +132,31 @@ except ImportError:
 def _parse_iso_dt(value: str) -> Optional[datetime]:
     """Parse an ISO datetime string into a tz-naive UTC datetime.
 
-    Always returns a naive datetime in UTC so callers can compare uniformly
-    without worrying about mixed aware/naive arithmetic.
+    Supported formats (in priority order):
+        - Year-only shorthand:  "1990"  → "1990-01-01"
+        - Date-only:            "1990-06-15"
+        - Full ISO (with tz):   "1990-06-15T00:00:00+00:00" / "...Z"
+        - Full ISO (naive):     "1990-06-15T00:00:00"
+
+    Returns None on failure; callers must treat the node as Always-Active.
     """
+    import logging
+    import re as _re
+    if not value:
+        return None
+    s = str(value).strip()
+    if _re.fullmatch(r"\d{4}", s):
+        s = f"{s}-01-01"
+    s = s.replace("Z", "+00:00")
     try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s)
         if dt.tzinfo is not None:
             dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
         return dt
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError) as e:
+        logging.getLogger("semantica.context").warning(
+            "Malformed temporal value %r — treating node as Always-Active. (%s)", value, e
+        )
         return None
 
 

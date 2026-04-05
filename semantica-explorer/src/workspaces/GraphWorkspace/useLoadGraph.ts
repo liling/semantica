@@ -4,16 +4,16 @@ import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
 
 // colors and hasher
 const CYBER_PALETTE = [
-  "#58a6ff", 
-  "#3fb950", 
-  "#d2a8ff", 
-  "#f0883e", 
-  "#ff7b72", 
-  "#79c0ff", 
-  "#d29922", 
-  "#bc8cff", 
-  "#56d364", 
-  "#f778ba"  
+  "#58a6ff",
+  "#3fb950",
+  "#d2a8ff",
+  "#f0883e",
+  "#ff7b72",
+  "#79c0ff",
+  "#d29922",
+  "#bc8cff",
+  "#56d364",
+  "#f778ba"
 ];
 
 
@@ -21,7 +21,7 @@ const hashCategory = (str: string): number => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0; 
+    hash |= 0;
   }
   return Math.abs(hash);
 };
@@ -63,12 +63,12 @@ export interface GraphLoadSummary {
   loadTimeMs: number;
 }
 
-const PAGE_LIMIT = 1000; 
+const PAGE_LIMIT = 1000;
 
 async function fetchAllNodes(signal: AbortSignal): Promise<number> {
   let skip = 0;
   let totalMerged = 0;
-  let hasMore = true; 
+  let hasMore = true;
 
   while (hasMore) {
     const url = new URL("/api/graph/nodes", window.location.origin);
@@ -77,18 +77,18 @@ async function fetchAllNodes(signal: AbortSignal): Promise<number> {
 
     const res = await fetch(url.toString(), { signal });
     if (!res.ok) {
-      const errorBody = await res.text(); 
+      const errorBody = await res.text();
       if (res.status === 422) {
-          console.error(`🚨 FastAPI 422 Crash Report at skip=${skip}:`, errorBody);
-          break;
+        console.error(`🚨 FastAPI 422 Crash Report at skip=${skip}:`, errorBody);
+        break;
       }
       throw new Error(`Fetch failed: ${res.status}`);
-  }
+    }
 
     const data: NodeListResponse = await res.json();
-    
+
     if (!data.nodes || data.nodes.length === 0) {
-        break;
+      break;
     }
 
     const nodesToMerge = data.nodes.map((n) => {
@@ -115,7 +115,7 @@ async function fetchAllNodes(signal: AbortSignal): Promise<number> {
     skip += PAGE_LIMIT;
 
     if (data.nodes.length < PAGE_LIMIT) {
-        hasMore = false;
+      hasMore = false;
     }
 
     await yieldToMain();
@@ -136,18 +136,18 @@ async function fetchAllEdges(signal: AbortSignal): Promise<number> {
 
     const res = await fetch(url.toString(), { signal });
     if (!res.ok) {
-      const errorBody = await res.text(); 
+      const errorBody = await res.text();
       if (res.status === 422) {
-          console.error(`🚨 FastAPI 422 Crash Report at skip=${skip}:`, errorBody);
-          break;
+        console.error(`🚨 FastAPI 422 Crash Report at skip=${skip}:`, errorBody);
+        break;
       }
       throw new Error(`Fetch failed: ${res.status}`);
-  }
+    }
 
     const data: EdgeListResponse = await res.json();
-    
+
     if (!data.edges || data.edges.length === 0) {
-        break;
+      break;
     }
 
     // Filter out edges pointing to missing nodes
@@ -172,7 +172,7 @@ async function fetchAllEdges(signal: AbortSignal): Promise<number> {
     skip += PAGE_LIMIT;
 
     if (data.edges.length < PAGE_LIMIT) {
-        hasMore = false;
+      hasMore = false;
     }
 
     await yieldToMain();
@@ -195,13 +195,12 @@ interface UseLoadGraphOptions {
 
 export function useLoadGraph(options: UseLoadGraphOptions = {}) {
   const { enabled = true, onGraphReady } = options;
-  const queryClient = useQueryClient();
 
   return useQuery<GraphLoadSummary>({
     queryKey: ["graph", "full-load"],
     enabled,
-    staleTime: Infinity, 
-    
+    staleTime: Infinity,
+
     queryFn: async ({ signal }): Promise<GraphLoadSummary> => {
       const t0 = performance.now();
 
@@ -216,14 +215,12 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
       graph.updateEachNodeAttributes((node, attr) => {
         const categoryStr = String(attr.nodeType || attr.properties?.community || attr.properties?.category || "default");
         const colorIndex = hashCategory(categoryStr) % CYBER_PALETTE.length;
-        
-       
+
+
         const degree = graph.degree(node);
-        const minSize = 2;  
-        const maxSize = 25; 
-        
-        // Flatten the power low curve to prevent giant graphs
-        // from consuming the screen
+        const minSize = 2;
+        const maxSize = 25;
+
 
         const sizeRatio = Math.log(degree + 1) / Math.log(maxDegree + 1);
         const dynamicSize = minSize + (maxSize - minSize) * sizeRatio;
@@ -232,7 +229,7 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
           ...attr,
           color: CYBER_PALETTE[colorIndex],
           size: dynamicSize,
-          borderColor: "#0d1117", 
+          borderColor: "#0d1117",
           borderSize: 0.5,
         };
       });

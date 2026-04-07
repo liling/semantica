@@ -228,7 +228,9 @@ class TestCheckPolicy(unittest.TestCase):
 
     def test_invalid_json_returns_error(self):
         result = json.loads(self.kit.check_policy("{not valid json}"))
-        self.assertIn("error", result)
+        # Implementation returns {"compliant": False, "violations": [...], "warnings": [...]}
+        self.assertFalse(result["compliant"])
+        self.assertTrue(len(result.get("violations", [])) > 0)
 
 
 class TestGetDecisionSummary(unittest.TestCase):

@@ -1,4 +1,11 @@
 import Graph from "graphology";
+import type {
+  GraphArrowVisibilityPolicy,
+  GraphBadgeKind,
+  GraphEdgeVariant,
+  GraphLabelVisibilityPolicy,
+  GraphNodeShapeVariant,
+} from "../workspaces/GraphWorkspace/graphTheme";
 
 
 export const graph = new Graph({ 
@@ -26,6 +33,13 @@ export interface NodeAttributes {
   strokeColor?: string;
   borderColor?: string;
   borderSize?: number;
+  nodeVariant?: GraphNodeShapeVariant;
+  nodeShapeVariant?: GraphNodeShapeVariant;
+  badgeKind?: GraphBadgeKind;
+  badgeCount?: number;
+  ringColor?: string;
+  haloColor?: string;
+  labelVisibilityPolicy?: GraphLabelVisibilityPolicy;
   highlighted?: boolean;
 
   nodeType: string;
@@ -47,6 +61,12 @@ export interface EdgeAttributes {
   edgeFamily?: "line" | "parallel" | "bidirectional" | "path";
   isBidirectional?: boolean;
   curveGroup?: string | null;
+  edgeVariant?: GraphEdgeVariant;
+  arrowVisibilityPolicy?: GraphArrowVisibilityPolicy;
+  relationshipStrength?: number;
+  isParallelPair?: boolean;
+  parallelIndex?: number;
+  parallelCount?: number;
   
  
   edgeType: string;

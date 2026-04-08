@@ -14,11 +14,17 @@ import { createViewModeSwitchBehavior } from "./behaviors/viewModeSwitchBehavior
 import {
   GRAPH_THEME,
   getZoomTier,
+  type GraphArrowVisibilityPolicy,
+  type GraphBadgeKind,
+  type GraphEdgeVariant,
   type GraphEdgeVisualState,
+  type GraphLabelVisibilityPolicy,
+  type GraphNodeShapeVariant,
   type GraphNodeVisualState,
   type GraphTheme,
   type GraphZoomTier,
   withAlpha,
+  zoomTierAtLeast,
 } from "./graphTheme";
 import type { GraphCameraState, GraphInteractionState, GraphLayoutStatus, GraphViewMode } from "./types";
 import type { GraphPluginRuntime } from "./plugins";
@@ -70,6 +76,37 @@ const MAX_FOCUS_NEIGHBORS = GRAPH_THEME.focus.maxNeighbors;
 const FOCUS_RING_CAPACITY = GRAPH_THEME.focus.ringCapacity;
 const FOCUS_RING_GAP = GRAPH_THEME.focus.ringGap;
 const FOCUS_PRIMARY_LABELS = GRAPH_THEME.focus.primaryLabels;
+
+type ResolvedNodeStyle = {
+  color: string;
+  size: number;
+  forceLabel: boolean;
+  label: string;
+  zIndex: number;
+  hidden: boolean;
+  borderColor: string;
+  borderSize: number;
+  nodeVariant: GraphNodeShapeVariant;
+  badgeKind?: GraphBadgeKind;
+  badgeCount?: number;
+  showBadge: boolean;
+  showRing: boolean;
+  ringColor?: string;
+  showHalo: boolean;
+  haloColor: string;
+};
+
+type ResolvedEdgeStyle = {
+  hidden: boolean;
+  type?: "line" | "arrow";
+  color?: string;
+  size?: number;
+  zIndex: number;
+  edgeVariant: GraphEdgeVariant;
+  arrowVisibilityPolicy: GraphArrowVisibilityPolicy;
+  curveStrength: number;
+  drawCurvedOverlay: boolean;
+};
 
 function buildPathEdgeSet(path: string[]): Set<string> {
   const edgeIds = new Set<string>();
@@ -217,21 +254,126 @@ function resolveEdgeVisualState(
   return "default";
 }
 
-function resolveNodeStyle(
+function resolveNodeVariant(state: GraphNodeVisualState, attrs: NodeAttributes): GraphNodeShapeVariant {
+  if (state === "selected") {
+    return "selected";
+  }
+
+  return attrs.nodeShapeVariant || attrs.nodeVariant || "default";
+}
+
+function resolveEdgeVariant(state: GraphEdgeVisualState, attrs: EdgeAttributes): GraphEdgeVariant {
+  if (state === "path") {
+    return "pathSignal";
+  }
+
+  if (attrs.edgeVariant) {
+    return attrs.edgeVariant;
+  }
+
+  if (attrs.isBidirectional) {
+    return "bidirectionalCurve";
+  }
+
+  if (attrs.arrowVisibilityPolicy === "contextual") {
+    return "directional";
+  }
+
+  return "line";
+}
+
+function shouldForceNodeLabel(
+  theme: GraphTheme,
+  zoomTier: GraphZoomTier,
+  state: GraphNodeVisualState,
+  attrs: NodeAttributes,
+  labelPriority: number,
+): boolean {
+  const tierConfig = theme.zoomTiers[zoomTier];
+  const forceVisibleState = theme.labels.forceVisibleStates.includes(state);
+  const policy = attrs.labelVisibilityPolicy || "priority";
+
+  if (forceVisibleState || theme.nodes.states[state].forceLabel) {
+    return true;
+  }
+
+  switch (policy as GraphLabelVisibilityPolicy) {
+    case "always":
+      return true;
+    case "local":
+      return zoomTier !== "overview" && state !== "default" && state !== "muted" && state !== "inactive";
+    case "priority":
+      return labelPriority >= tierConfig.labelThreshold;
+    case "none":
+    default:
+      return false;
+  }
+}
+
+function resolveNodeBorderColor(
+  theme: GraphTheme,
+  state: GraphNodeVisualState,
+  variant: GraphNodeShapeVariant,
+  attrs: NodeAttributes,
+  baseColor: string,
+) {
+  if (state === "selected" || variant === "selected") {
+    return attrs.ringColor || theme.nodes.selectedRing.color;
+  }
+  if (state === "hovered") {
+    return theme.palette.accent.hovered;
+  }
+  if (state === "path") {
+    return theme.palette.accent.path;
+  }
+  if (state === "muted" || state === "inactive") {
+    return withAlpha(attrs.strokeColor || attrs.borderColor || theme.palette.background.nodeBorder, 0.7);
+  }
+
+  if (variant === "temporal") {
+    return theme.palette.accent.temporal;
+  }
+  if (variant === "provenance") {
+    return theme.palette.accent.provenance;
+  }
+  if (variant === "inferred") {
+    return theme.palette.accent.inferred;
+  }
+
+  return attrs.strokeColor || attrs.borderColor || theme.palette.background.nodeBorder || baseColor;
+}
+
+function resolveNodeElementStyle(
   theme: GraphTheme,
   zoomTier: GraphZoomTier,
   state: GraphNodeVisualState,
   attrs: NodeAttributes,
   label: string,
-) {
+): ResolvedNodeStyle {
   const tierConfig = theme.zoomTiers[zoomTier];
   const stateConfig = theme.nodes.states[state];
+  const nodeVariant = resolveNodeVariant(state, attrs);
+  const variantConfig = theme.nodes.variants[nodeVariant];
   const baseSize = Number(attrs.baseSize || attrs.size || 4);
   const labelPriority = Number(attrs.labelPriority ?? 0);
-  const forceVisibleState = theme.labels.forceVisibleStates.includes(state);
   const color = resolveNodeColor(theme, state, attrs, attrs.color);
-  const sizeMultiplier = state === "default" ? tierConfig.nodeScale : stateConfig.sizeMultiplier;
-  const forceLabel = forceVisibleState || stateConfig.forceLabel || labelPriority >= tierConfig.labelThreshold;
+  const sizeMultiplier = (state === "default" ? tierConfig.nodeScale : stateConfig.sizeMultiplier) * variantConfig.sizeMultiplier;
+  const forceLabel = shouldForceNodeLabel(theme, zoomTier, state, attrs, labelPriority);
+  const badgeKind = attrs.badgeKind || variantConfig.badgeKind;
+  const forceVisibleState = theme.labels.forceVisibleStates.includes(state);
+  const showBadge = Boolean(
+    badgeKind
+    && (forceVisibleState || (tierConfig.showBadges && zoomTierAtLeast(zoomTier, variantConfig.badgeVisibleFrom)))
+    && state !== "muted"
+    && state !== "inactive",
+  );
+  const showRing = state === "selected" && zoomTierAtLeast(zoomTier, theme.nodes.selectedRing.visibleFrom);
+  const showHalo = state === "hovered" || state === "selected" || state === "path";
+  const strokeBase = state === "muted" || state === "inactive"
+    ? theme.nodes.strokeHierarchy[zoomTier].muted
+    : forceVisibleState
+      ? theme.nodes.strokeHierarchy[zoomTier].emphasis
+      : theme.nodes.strokeHierarchy[zoomTier].base;
 
   return {
     color,
@@ -240,8 +382,19 @@ function resolveNodeStyle(
     label: forceLabel ? label : "",
     zIndex: forceLabel && stateConfig.zIndex === 0 ? 1 : stateConfig.zIndex,
     hidden: false,
-    borderColor: attrs.strokeColor || attrs.borderColor || theme.palette.background.nodeBorder,
-    borderSize: attrs.borderSize,
+    borderColor: resolveNodeBorderColor(theme, state, nodeVariant, attrs, color),
+    borderSize: Math.max(
+      0.4,
+      Number(attrs.borderSize ?? 0.85) + strokeBase + stateConfig.borderBoost + variantConfig.borderBoost - 0.8,
+    ),
+    nodeVariant,
+    badgeKind,
+    badgeCount: attrs.badgeCount,
+    showBadge,
+    showRing,
+    ringColor: attrs.ringColor || theme.nodes.selectedRing.color,
+    showHalo,
+    haloColor: attrs.haloColor || attrs.glowColor || withAlpha(color, theme.overlays.hoverGlowAlpha + variantConfig.haloBoost),
   };
 }
 
@@ -249,54 +402,70 @@ function resolveEdgeType(
   theme: GraphTheme,
   zoomTier: GraphZoomTier,
   state: GraphEdgeVisualState,
+  variant: GraphEdgeVariant,
   attrs: EdgeAttributes,
-) {
-  if (theme.edges.states[state].forceArrow) {
+): "line" | "arrow" {
+  const variantConfig = theme.edges.variants[variant];
+
+  if (theme.edges.states[state].forceArrow || variantConfig.arrowPolicy === "always") {
     return "arrow";
   }
 
-  if (state === "neighbor") {
-    return zoomTier === "inspection" || Boolean(attrs.isBidirectional) ? "arrow" : "line";
+  if (variantConfig.arrowPolicy === "contextual" && theme.zoomTiers[zoomTier].showContextualArrows) {
+    return "arrow";
   }
 
   if (state !== "default") {
-    return attrs.type || "line";
+    return (attrs.type as "line" | "arrow" | undefined) || variantConfig.baseType;
   }
 
-  return Number(attrs.visualPriority ?? 0) >= theme.zoomTiers[zoomTier].arrowPriorityThreshold || Boolean(attrs.isBidirectional)
+  return Number(attrs.visualPriority ?? 0) >= theme.zoomTiers[zoomTier].arrowPriorityThreshold && theme.zoomTiers[zoomTier].showContextualArrows
     ? "arrow"
     : "line";
 }
 
-function resolveEdgeStyle(
+function resolveEdgeElementStyle(
   theme: GraphTheme,
   zoomTier: GraphZoomTier,
   state: GraphEdgeVisualState,
   attrs: EdgeAttributes,
-) {
+): ResolvedEdgeStyle {
   const tierConfig = theme.zoomTiers[zoomTier];
   const stateConfig = theme.edges.states[state];
+  const edgeVariant = resolveEdgeVariant(state, attrs);
+  const variantConfig = theme.edges.variants[edgeVariant];
   const baseSize = Number(attrs.baseSize || attrs.size || 0.9);
   const visualPriority = Number(attrs.visualPriority ?? 0);
   const belowPriorityThreshold = state === "default"
     && visualPriority < tierConfig.edgePriorityThreshold
-    && !attrs.isBidirectional;
+    && edgeVariant === "line";
 
   if (stateConfig.hide || belowPriorityThreshold) {
     return {
       hidden: true,
       zIndex: 0,
+      edgeVariant,
+      arrowVisibilityPolicy: variantConfig.arrowPolicy,
+      curveStrength: variantConfig.curveStrength,
+      drawCurvedOverlay: false,
     };
   }
 
-  const sizeMultiplier = state === "default" ? tierConfig.edgeSizeScale : stateConfig.sizeMultiplier;
+  const sizeMultiplier = (state === "default" ? tierConfig.edgeSizeScale : stateConfig.sizeMultiplier) * variantConfig.sizeMultiplier;
+  const drawCurvedOverlay = tierConfig.showCurves
+    && (edgeVariant === "bidirectionalCurve" || edgeVariant === "parallelCurve" || edgeVariant === "pathSignal")
+    && zoomTier !== "overview";
 
   return {
     hidden: false,
-    type: resolveEdgeType(theme, zoomTier, state, attrs),
+    type: resolveEdgeType(theme, zoomTier, state, edgeVariant, attrs),
     color: resolveEdgeColor(theme, state, attrs, attrs.color),
     size: Math.max(baseSize * sizeMultiplier, stateConfig.minSize),
     zIndex: stateConfig.zIndex,
+    edgeVariant,
+    arrowVisibilityPolicy: variantConfig.arrowPolicy,
+    curveStrength: variantConfig.curveStrength,
+    drawCurvedOverlay,
   };
 }
 
@@ -320,7 +489,7 @@ function createFocusedGraph(nodeId: string, activePath: string[]): Graph<NodeAtt
   };
 
   const selectedAttrs = graph.getNodeAttributes(nodeId) as NodeAttributes;
-  const selectedState = resolveNodeStyle(GRAPH_THEME, "inspection", "selected", selectedAttrs, selectedAttrs.label);
+  const selectedState = resolveNodeElementStyle(GRAPH_THEME, "inspection", "selected", selectedAttrs, selectedAttrs.label);
   addNode(nodeId, {
     ...selectedAttrs,
     x: 0,
@@ -345,7 +514,7 @@ function createFocusedGraph(nodeId: string, activePath: string[]): Graph<NodeAtt
       : labelledNeighborIds.has(neighborId)
         ? "neighbor"
         : "default";
-    const style = resolveNodeStyle(
+    const style = resolveNodeElementStyle(
       GRAPH_THEME,
       "inspection",
       visualState,
@@ -379,7 +548,7 @@ function createFocusedGraph(nodeId: string, activePath: string[]): Graph<NodeAtt
         : source === nodeId || target === nodeId
           ? "selected"
           : "neighbor";
-      const style = resolveEdgeStyle(GRAPH_THEME, "inspection", state, attrs);
+      const style = resolveEdgeElementStyle(GRAPH_THEME, "inspection", state, attrs);
       focused.mergeDirectedEdge(source, target, {
         ...attrs,
         type: style.type,
@@ -390,6 +559,120 @@ function createFocusedGraph(nodeId: string, activePath: string[]): Graph<NodeAtt
   }
 
   return focused;
+}
+
+function drawGlowHalo(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+) {
+  const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+  gradient.addColorStop(0, color);
+  gradient.addColorStop(1, "rgba(0,0,0,0)");
+  context.fillStyle = gradient;
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.fill();
+}
+
+function drawNodeRing(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  width: number,
+  glowAlpha: number,
+) {
+  context.strokeStyle = withAlpha(color, glowAlpha);
+  context.lineWidth = width * 2.4;
+  context.beginPath();
+  context.arc(x, y, radius + width * 1.9, 0, Math.PI * 2);
+  context.stroke();
+
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.beginPath();
+  context.arc(x, y, radius + width * 1.45, 0, Math.PI * 2);
+  context.stroke();
+}
+
+function drawNodeBadge(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  nodeRadius: number,
+  badgeKind: GraphBadgeKind,
+  badgeCount: number | undefined,
+) {
+  const badgeTheme = GRAPH_THEME.nodes.badges[badgeKind];
+  const radius = GRAPH_THEME.nodes.badge.radius;
+  const offset = GRAPH_THEME.nodes.badge.offset;
+  const badgeX = x + Math.max(nodeRadius * 0.62, radius + offset);
+  const badgeY = y - Math.max(nodeRadius * 0.62, radius + offset);
+
+  drawGlowHalo(
+    context,
+    badgeX,
+    badgeY,
+    GRAPH_THEME.overlays.badgeGlowRadius,
+    withAlpha(badgeTheme.color, GRAPH_THEME.nodes.badge.glowAlpha),
+  );
+
+  context.fillStyle = badgeTheme.color;
+  context.beginPath();
+  context.arc(badgeX, badgeY, radius, 0, Math.PI * 2);
+  context.fill();
+
+  context.strokeStyle = GRAPH_THEME.nodes.badge.stroke;
+  context.lineWidth = 1;
+  context.beginPath();
+  context.arc(badgeX, badgeY, radius, 0, Math.PI * 2);
+  context.stroke();
+
+  context.fillStyle = GRAPH_THEME.nodes.badge.textColor;
+  context.font = `700 ${GRAPH_THEME.nodes.badge.fontSize}px Inter, system-ui, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  const label = badgeKind === "provenance" && badgeCount && badgeCount > 1
+    ? String(Math.min(9, badgeCount))
+    : badgeTheme.label;
+  context.fillText(label, badgeX, badgeY + 0.5);
+}
+
+function drawCurvedEdge(
+  context: CanvasRenderingContext2D,
+  source: { x: number; y: number },
+  target: { x: number; y: number },
+  color: string,
+  width: number,
+  curvature: number,
+  glowAlpha: number,
+) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const length = Math.max(Math.hypot(dx, dy), 1);
+  const nx = -dy / length;
+  const ny = dx / length;
+  const curveOffset = length * curvature;
+  const controlX = (source.x + target.x) / 2 + nx * curveOffset;
+  const controlY = (source.y + target.y) / 2 + ny * curveOffset;
+
+  context.strokeStyle = withAlpha(color, glowAlpha);
+  context.lineWidth = width + GRAPH_THEME.overlays.curveGlowWidth;
+  context.beginPath();
+  context.moveTo(source.x, source.y);
+  context.quadraticCurveTo(controlX, controlY, target.x, target.y);
+  context.stroke();
+
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.beginPath();
+  context.moveTo(source.x, source.y);
+  context.quadraticCurveTo(controlX, controlY, target.x, target.y);
+  context.stroke();
 }
 
 function applySceneState(
@@ -405,7 +688,7 @@ function applySceneState(
   sigma.setSetting("nodeReducer", (node, data) => {
     const attrs = data as NodeAttributes;
     const state = resolveNodeVisualState(node, hoveredNodeId, selectedNodeId, focusIds, pathNodeIds);
-    const style = resolveNodeStyle(GRAPH_THEME, zoomTier, state, attrs, data.label);
+    const style = resolveNodeElementStyle(GRAPH_THEME, zoomTier, state, attrs, data.label);
 
     return {
       ...data,
@@ -424,7 +707,7 @@ function applySceneState(
     const attrs = data as EdgeAttributes;
     const [source, target] = graph.extremities(edge);
     const state = resolveEdgeVisualState(source, target, hoveredNodeId, selectedNodeId, focusIds, pathEdgeIds);
-    const style = resolveEdgeStyle(GRAPH_THEME, zoomTier, state, attrs);
+    const style = resolveEdgeElementStyle(GRAPH_THEME, zoomTier, state, attrs);
 
     return {
       ...data,
@@ -729,32 +1012,102 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         context.clearRect(0, 0, rect.width, rect.height);
 
         const primaryNodeId = interactionState.hoveredNodeId || interactionState.selectedNodeId;
-        const nodesToGlow = new Set<string>([
-          ...interactionState.activePath,
+        const focusIds = primaryNodeId && graph.hasNode(primaryNodeId) ? buildFocusSet(primaryNodeId) : new Set<string>();
+        const pathNodeIds = new Set(interactionState.activePath);
+        const edgePairs = buildPathEdgeSet(interactionState.activePath);
+        const nodesToDecorate = new Set<string>([
+          ...focusIds,
+          ...pathNodeIds,
           ...(primaryNodeId ? [primaryNodeId] : []),
         ]);
-        const edgePairs = buildPathEdgeSet(interactionState.activePath);
         const now = performance.now() / 1000;
 
-        nodesToGlow.forEach((nodeId) => {
+        nodesToDecorate.forEach((nodeId) => {
           const displayData = sigma.getNodeDisplayData(nodeId);
           if (!displayData) return;
+          const attrs = graph.getNodeAttributes(nodeId) as NodeAttributes;
+          const state = resolveNodeVisualState(nodeId, interactionState.hoveredNodeId, interactionState.selectedNodeId, focusIds, pathNodeIds);
+          const style = resolveNodeElementStyle(GRAPH_THEME, interactionState.zoomTier, state, attrs, attrs.label);
           const point = sigma.graphToViewport({ x: displayData.x, y: displayData.y });
-          const glowColor = nodeId === primaryNodeId
-            ? withAlpha(GRAPH_THEME.palette.accent.hovered, GRAPH_THEME.overlays.hoverGlowAlpha)
-            : withAlpha(GRAPH_THEME.palette.accent.path, GRAPH_THEME.overlays.pathGlowAlpha);
-          const radius = Math.max(
-            displayData.size * GRAPH_THEME.overlays.glowRadiusMultiplier,
-            GRAPH_THEME.overlays.minGlowRadius,
-          );
-          const gradient = context.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
-          gradient.addColorStop(0, glowColor);
-          gradient.addColorStop(1, "rgba(0,0,0,0)");
-          context.fillStyle = gradient;
-          context.beginPath();
-          context.arc(point.x, point.y, radius, 0, Math.PI * 2);
-          context.fill();
+          if (style.showHalo) {
+            const radius = Math.max(
+              displayData.size * GRAPH_THEME.overlays.glowRadiusMultiplier * (style.nodeVariant === "selected" ? 1.08 : 1),
+              GRAPH_THEME.overlays.minGlowRadius,
+            );
+            drawGlowHalo(
+              context,
+              point.x,
+              point.y,
+              radius,
+              withAlpha(
+                style.haloColor,
+                nodeId === primaryNodeId ? GRAPH_THEME.overlays.hoverGlowAlpha : GRAPH_THEME.overlays.pathGlowAlpha,
+              ),
+            );
+          }
+
+          if (style.showRing) {
+            drawNodeRing(
+              context,
+              point.x,
+              point.y,
+              displayData.size,
+              style.ringColor || GRAPH_THEME.nodes.selectedRing.color,
+              GRAPH_THEME.nodes.selectedRing.width,
+              GRAPH_THEME.nodes.selectedRing.glowAlpha,
+            );
+          }
+
+          if (style.showBadge && style.badgeKind) {
+            drawNodeBadge(context, point.x, point.y, displayData.size, style.badgeKind, style.badgeCount);
+          }
         });
+
+        if (GRAPH_THEME.zoomTiers[interactionState.zoomTier].showCurves && primaryNodeId) {
+          const drawnPairs = new Set<string>();
+          focusIds.forEach((sourceId) => {
+            focusIds.forEach((targetId) => {
+              if (sourceId >= targetId) {
+                return;
+              }
+              if (!graph.hasDirectedEdge(sourceId, targetId) || !graph.hasDirectedEdge(targetId, sourceId)) {
+                return;
+              }
+
+              const pairKey = [sourceId, targetId].sort().join("::");
+              if (drawnPairs.has(pairKey)) {
+                return;
+              }
+              drawnPairs.add(pairKey);
+
+              const sourceData = sigma.getNodeDisplayData(sourceId);
+              const targetData = sigma.getNodeDisplayData(targetId);
+              if (!sourceData || !targetData) {
+                return;
+              }
+
+              const attrs = graph.getDirectedEdgeAttributes(sourceId, targetId) as EdgeAttributes;
+              const state: GraphEdgeVisualState =
+                sourceId === primaryNodeId || targetId === primaryNodeId
+                  ? interactionState.hoveredNodeId ? "hovered" : "selected"
+                  : "neighbor";
+              const style = resolveEdgeElementStyle(GRAPH_THEME, interactionState.zoomTier, state, attrs);
+              if (!style.drawCurvedOverlay || !style.color || !style.size) {
+                return;
+              }
+
+              drawCurvedEdge(
+                context,
+                sigma.graphToViewport({ x: sourceData.x, y: sourceData.y }),
+                sigma.graphToViewport({ x: targetData.x, y: targetData.y }),
+                style.color,
+                Math.max(style.size, GRAPH_THEME.overlays.curveLineWidth),
+                style.curveStrength,
+                GRAPH_THEME.edges.variants.bidirectionalCurve.glowAlpha,
+              );
+            });
+          });
+        }
 
         if (interactionState.activePath.length > 1) {
           for (let index = 0; index < interactionState.activePath.length - 1; index += 1) {
@@ -766,6 +1119,26 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             if (!sourceData || !targetData) continue;
             const source = sigma.graphToViewport({ x: sourceData.x, y: sourceData.y });
             const target = sigma.graphToViewport({ x: targetData.x, y: targetData.y });
+            const attrs = graph.hasDirectedEdge(sourceId, targetId)
+              ? (graph.getDirectedEdgeAttributes(sourceId, targetId) as EdgeAttributes)
+              : ({
+                  baseColor: GRAPH_THEME.palette.accent.path,
+                  baseSize: 1.2,
+                  edgeVariant: "pathSignal",
+                  arrowVisibilityPolicy: "always",
+                } as EdgeAttributes);
+            const pathStyle = resolveEdgeElementStyle(GRAPH_THEME, interactionState.zoomTier, "path", attrs);
+            if (pathStyle.color && pathStyle.size) {
+              drawCurvedEdge(
+                context,
+                source,
+                target,
+                pathStyle.color,
+                Math.max(pathStyle.size, GRAPH_THEME.overlays.curveLineWidth + 0.4),
+                pathStyle.curveStrength || GRAPH_THEME.edges.variants.pathSignal.curveStrength,
+                GRAPH_THEME.edges.variants.pathSignal.glowAlpha,
+              );
+            }
             const t = ((now * 0.22) + index * 0.17) % 1;
             const x = source.x + (target.x - source.x) * t;
             const y = source.y + (target.y - source.y) * t;

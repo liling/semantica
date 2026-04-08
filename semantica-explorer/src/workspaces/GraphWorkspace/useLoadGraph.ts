@@ -1,7 +1,17 @@
 ﻿import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { batchMergeEdges, batchMergeNodes, clearGraph } from "../../store/graphStore";
 import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
-import { GRAPH_THEME, clamp, darkenHex, hashString, withAlpha } from "./graphTheme";
+import {
+  GRAPH_THEME,
+  clamp,
+  darkenHex,
+  hashString,
+  withAlpha,
+  type GraphBadgeKind,
+  type GraphEdgeVariant,
+  type GraphLabelVisibilityPolicy,
+  type GraphNodeShapeVariant,
+} from "./graphTheme";
 
 const SEMANTIC_COLOR_FIELDS = [
   "community",
@@ -14,6 +24,8 @@ const SEMANTIC_COLOR_FIELDS = [
   "source",
   "nodeType",
 ] as const;
+
+const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
 
 function getSemanticFieldValue(attributes: NodeAttributes, field: (typeof SEMANTIC_COLOR_FIELDS)[number]): string | null {
   if (field === "nodeType") {
@@ -96,6 +108,87 @@ function chooseColorAccessor(
 function structuralColorKey(nodeId: string, attributes: NodeAttributes): string {
   const shard = hashString(nodeId) % GRAPH_THEME.palette.semantic.length;
   return `${attributes.nodeType || "entity"}:${shard}`;
+}
+
+function getProvenanceCount(properties: Record<string, unknown>): number {
+  return PROVENANCE_KEYS.reduce(
+    (count, key) => (properties[key] !== undefined && properties[key] !== null ? count + 1 : count),
+    0,
+  );
+}
+
+function resolveNodeVariantMetadata(
+  baseColor: string,
+  sizeRatio: number,
+  hasTemporalBounds: boolean,
+  provenanceCount: number,
+): Pick<
+  NodeAttributes,
+  "nodeVariant" | "nodeShapeVariant" | "badgeKind" | "badgeCount" | "ringColor" | "haloColor" | "labelVisibilityPolicy"
+> {
+  let nodeShapeVariant: GraphNodeShapeVariant = "default";
+  let badgeKind: GraphBadgeKind | undefined;
+  let badgeCount: number | undefined;
+
+  if (hasTemporalBounds) {
+    nodeShapeVariant = "temporal";
+    badgeKind = "temporal";
+  } else if (provenanceCount > 0) {
+    nodeShapeVariant = "provenance";
+    badgeKind = "provenance";
+    badgeCount = provenanceCount;
+  }
+
+  let labelVisibilityPolicy: GraphLabelVisibilityPolicy = "none";
+  if (sizeRatio >= 0.86) {
+    labelVisibilityPolicy = "always";
+  } else if (badgeKind) {
+    labelVisibilityPolicy = "local";
+  } else if (sizeRatio >= 0.56) {
+    labelVisibilityPolicy = "priority";
+  }
+
+  return {
+    nodeVariant: nodeShapeVariant,
+    nodeShapeVariant,
+    badgeKind,
+    badgeCount,
+    ringColor: GRAPH_THEME.nodes.selectedRing.color,
+    haloColor: withAlpha(baseColor, 0.38),
+    labelVisibilityPolicy,
+  };
+}
+
+function resolveEdgeVariantMetadata(
+  edge: ApiEdge,
+  sourcePriority: number,
+  targetPriority: number,
+  isBidirectional: boolean,
+): Pick<
+  EdgeAttributes,
+  "edgeVariant" | "arrowVisibilityPolicy" | "relationshipStrength" | "isParallelPair" | "parallelIndex" | "parallelCount"
+> {
+  const relationshipStrength = clamp(
+    0.12,
+    0.18 + Math.log(Math.max(Number(edge.weight) || 1, 1)) / Math.log(12),
+    1,
+  );
+
+  let edgeVariant: GraphEdgeVariant = "line";
+  if (isBidirectional) {
+    edgeVariant = "bidirectionalCurve";
+  } else if (Math.max(sourcePriority, targetPriority, relationshipStrength) >= 0.58) {
+    edgeVariant = "directional";
+  }
+
+  return {
+    edgeVariant,
+    arrowVisibilityPolicy: edgeVariant === "line" ? "hidden" : "contextual",
+    relationshipStrength,
+    isParallelPair: false,
+    parallelIndex: 0,
+    parallelCount: 1,
+  };
 }
 
 interface ApiNode {
@@ -344,6 +437,8 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
         const baseColor = GRAPH_THEME.palette.semantic[colorIndex];
         const sizeRatio = nodePriorityById.get(id) ?? 0;
         const dynamicSize = clamp(2.6, 2.6 + 12.4 * sizeRatio, 15.8);
+        const hasTemporalBounds = Boolean(attributes.valid_from || attributes.valid_until);
+        const provenanceCount = getProvenanceCount(attributes.properties ?? {});
         return {
           id,
           attributes: {
@@ -360,36 +455,41 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
             strokeColor: darkenHex(baseColor, 112),
             borderColor: darkenHex(baseColor, 112),
             borderSize: 0.85,
+            ...resolveNodeVariantMetadata(baseColor, sizeRatio, hasTemporalBounds, provenanceCount),
           } as NodeAttributes,
         };
       });
 
       const edgeKeys = new Set(fetchedEdges.map((edge) => `${edge.source}::${edge.target}`));
 
-      const edgesToMerge = fetchedEdges.map((edge) => ({
-        source: edge.source,
-        target: edge.target,
-        attributes: {
-          weight: edge.weight,
-          edgeType: edge.type,
-          properties: edge.properties,
-          size: clamp(0.45, 0.5 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.38, 1.8),
-          baseSize: clamp(0.45, 0.5 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.38, 1.8),
-          color: GRAPH_THEME.palette.muted.edgeStructure,
-          baseColor: GRAPH_THEME.palette.muted.edgeStructure,
-          mutedColor: GRAPH_THEME.palette.muted.edgeOverview,
-          visualPriority: Math.max(
-            nodePriorityById.get(edge.source) ?? 0,
-            nodePriorityById.get(edge.target) ?? 0,
-          ),
-          isBidirectional: edgeKeys.has(`${edge.target}::${edge.source}`),
-          edgeFamily: edgeKeys.has(`${edge.target}::${edge.source}`) ? "bidirectional" : "line",
-          curveGroup: edgeKeys.has(`${edge.target}::${edge.source}`)
-            ? [edge.source, edge.target].sort().join("::")
-            : null,
-          type: "line",
-        } as EdgeAttributes,
-      }));
+      const edgesToMerge = fetchedEdges.map((edge) => {
+        const sourcePriority = nodePriorityById.get(edge.source) ?? 0;
+        const targetPriority = nodePriorityById.get(edge.target) ?? 0;
+        const isBidirectional = edgeKeys.has(`${edge.target}::${edge.source}`);
+
+        return {
+          source: edge.source,
+          target: edge.target,
+          attributes: {
+            weight: edge.weight,
+            edgeType: edge.type,
+            properties: edge.properties,
+            size: clamp(0.45, 0.5 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.38, 1.8),
+            baseSize: clamp(0.45, 0.5 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.38, 1.8),
+            color: GRAPH_THEME.palette.muted.edgeStructure,
+            baseColor: GRAPH_THEME.palette.muted.edgeStructure,
+            mutedColor: GRAPH_THEME.palette.muted.edgeOverview,
+            visualPriority: Math.max(sourcePriority, targetPriority),
+            isBidirectional,
+            edgeFamily: isBidirectional ? "bidirectional" : "line",
+            curveGroup: isBidirectional
+              ? [edge.source, edge.target].sort().join("::")
+              : null,
+            type: "line",
+            ...resolveEdgeVariantMetadata(edge, sourcePriority, targetPriority, isBidirectional),
+          } as EdgeAttributes,
+        };
+      });
 
       onProgress?.({
         phase: "rendering",

@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { batchMergeEdges, batchMergeNodes, graph } from "../../store/graphStore";
+import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
 import { GraphCanvas } from "./GraphCanvas";
 import type { GraphCanvasHandle, GraphViewMode } from "./GraphCanvas";
 import { TimelinePanel } from "./TimelinePanel";
@@ -48,6 +49,8 @@ type TemporalBounds = {
   min?: string | null;
   max?: string | null;
 };
+
+const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -279,10 +282,93 @@ function LoadingOverlay({
 }
 
 function sourceAttribution(properties: Record<string, unknown>) {
-  const keys = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"];
-  return keys
+  return PROVENANCE_KEYS
     .filter((key) => key in properties)
     .map((key) => ({ key, value: properties[key] }));
+}
+
+function getProvenanceCount(properties: Record<string, unknown>) {
+  return PROVENANCE_KEYS.reduce(
+    (count, key) => (properties[key] !== undefined && properties[key] !== null ? count + 1 : count),
+    0,
+  );
+}
+
+function buildRealtimeNodeAttributes(payload: {
+  id: string;
+  type?: string;
+  properties?: Record<string, unknown>;
+}): NodeAttributes {
+  const properties = payload.properties || {};
+  const label = String(properties.content || payload.id);
+  const baseColor = GRAPH_THEME.palette.accent.path;
+  const hasTemporalBounds = Boolean(properties.valid_from || properties.valid_until);
+  const provenanceCount = getProvenanceCount(properties);
+
+  return {
+    label,
+    x: Number(properties.x ?? Math.random() * 1000 - 500),
+    y: Number(properties.y ?? Math.random() * 1000 - 500),
+    nodeType: payload.type || "inferred",
+    content: label,
+    valid_from: (properties.valid_from as string | null | undefined) ?? null,
+    valid_until: (properties.valid_until as string | null | undefined) ?? null,
+    properties,
+    size: 8,
+    baseSize: 8,
+    semanticGroup: payload.type || "inferred",
+    color: baseColor,
+    baseColor,
+    mutedColor: withAlpha(baseColor, GRAPH_THEME.nodes.mutedAlpha),
+    glowColor: withAlpha(baseColor, 0.36),
+    visualPriority: 0.82,
+    labelPriority: 0.82,
+    strokeColor: GRAPH_THEME.palette.background.nodeBorder,
+    borderColor: GRAPH_THEME.palette.background.nodeBorder,
+    borderSize: 0.85,
+    nodeVariant: "inferred",
+    nodeShapeVariant: "inferred",
+    badgeKind: hasTemporalBounds ? "temporal" : provenanceCount > 0 ? "provenance" : "inferred",
+    badgeCount: provenanceCount || undefined,
+    ringColor: GRAPH_THEME.nodes.selectedRing.color,
+    haloColor: withAlpha(baseColor, 0.42),
+    labelVisibilityPolicy: "local",
+  };
+}
+
+function buildRealtimeEdgeAttributes(payload: {
+  source_id: string;
+  target_id: string;
+  type?: string;
+  weight?: number;
+  properties?: Record<string, unknown>;
+}): EdgeAttributes {
+  const properties = payload.properties || {};
+  const isInferred = Boolean(properties.inferred);
+  const isBidirectional = graph.hasDirectedEdge(payload.target_id, payload.source_id);
+  const baseColor = isInferred ? GRAPH_THEME.palette.accent.path : GRAPH_THEME.palette.muted.edgeStructure;
+
+  return {
+    weight: Number(payload.weight ?? 1),
+    edgeType: payload.type || "related_to",
+    properties,
+    size: 1,
+    baseSize: 1,
+    color: baseColor,
+    baseColor,
+    mutedColor: GRAPH_THEME.palette.muted.edgeOverview,
+    visualPriority: isInferred ? 0.95 : 0.5,
+    isBidirectional,
+    edgeFamily: isInferred ? "path" : isBidirectional ? "bidirectional" : "line",
+    curveGroup: isBidirectional ? [payload.source_id, payload.target_id].sort().join("::") : null,
+    type: "line",
+    edgeVariant: isInferred ? "pathSignal" : isBidirectional ? "bidirectionalCurve" : "directional",
+    arrowVisibilityPolicy: isInferred ? "always" : "contextual",
+    relationshipStrength: isInferred ? 0.95 : 0.52,
+    isParallelPair: false,
+    parallelIndex: 0,
+    parallelCount: 1,
+  };
 }
 
 function buildSelectedNodeState(nodeId: string): GraphSelectedNodeState | null {
@@ -837,28 +923,7 @@ export function GraphWorkspace() {
           batchMergeNodes([
             {
               id: payload.id,
-              attributes: {
-                label: payload.properties?.content || payload.id,
-                x: Number(payload.properties?.x ?? Math.random() * 1000 - 500),
-                y: Number(payload.properties?.y ?? Math.random() * 1000 - 500),
-                nodeType: payload.type,
-                content: payload.properties?.content || payload.id,
-                valid_from: payload.properties?.valid_from ?? null,
-                valid_until: payload.properties?.valid_until ?? null,
-                properties: payload.properties || {},
-                size: 8,
-                baseSize: 8,
-                semanticGroup: payload.type || "inferred",
-                color: GRAPH_THEME.palette.accent.path,
-                baseColor: GRAPH_THEME.palette.accent.path,
-                mutedColor: withAlpha(GRAPH_THEME.palette.accent.path, GRAPH_THEME.nodes.mutedAlpha),
-                glowColor: withAlpha(GRAPH_THEME.palette.accent.path, 0.36),
-                visualPriority: 0.82,
-                labelPriority: 0.82,
-                strokeColor: GRAPH_THEME.palette.background.nodeBorder,
-                borderColor: GRAPH_THEME.palette.background.nodeBorder,
-                borderSize: 0.85,
-              },
+              attributes: buildRealtimeNodeAttributes(payload),
             },
           ]);
           canvasRef.current?.getSigma()?.refresh();
@@ -868,27 +933,7 @@ export function GraphWorkspace() {
             {
               source: payload.source_id,
               target: payload.target_id,
-              attributes: {
-                weight: Number(payload.weight ?? 1),
-                edgeType: payload.type,
-                properties: payload.properties || {},
-                size: 1,
-                baseSize: 1,
-                color: payload.properties?.inferred ? GRAPH_THEME.palette.accent.path : GRAPH_THEME.palette.muted.edgeStructure,
-                baseColor: payload.properties?.inferred ? GRAPH_THEME.palette.accent.path : GRAPH_THEME.palette.muted.edgeStructure,
-                mutedColor: GRAPH_THEME.palette.muted.edgeOverview,
-                visualPriority: payload.properties?.inferred ? 0.95 : 0.5,
-                isBidirectional: graph.hasDirectedEdge(payload.target_id, payload.source_id),
-                edgeFamily: payload.properties?.inferred
-                  ? "path"
-                  : graph.hasDirectedEdge(payload.target_id, payload.source_id)
-                    ? "bidirectional"
-                    : "line",
-                curveGroup: graph.hasDirectedEdge(payload.target_id, payload.source_id)
-                  ? [payload.source_id, payload.target_id].sort().join("::")
-                  : null,
-                type: payload.properties?.inferred ? "arrow" : "line",
-              },
+              attributes: buildRealtimeEdgeAttributes(payload),
             },
           ]);
           canvasRef.current?.getSigma()?.refresh();

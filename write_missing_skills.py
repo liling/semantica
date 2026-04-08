@@ -1025,7 +1025,8 @@ Flag as WARNING if gap rate > 5%.
 for skill_name, content in SKILLS.items():
     path = os.path.join(base, skill_name, 'SKILL.md')
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, 'w').write(content)
+    with open(path, 'w') as f:
+        f.write(content)
     print(f'written: {skill_name}')
 
 print("All done.")

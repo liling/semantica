@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    {
+      "name": "semantica-cursor",
+      "description": "Semantica plugin for Cursor: knowledge graph skills and analytics.",
+      "path": "."
+    }
+  ]
+}

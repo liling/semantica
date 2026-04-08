@@ -1,0 +1,19 @@
+{
+  "plugins": [
+    {
+      "name": "semantica-claude",
+      "description": "Semantica plugin for Claude: knowledge graph skills, reasoning, extraction, and visualization.",
+      "path": "."
+    },
+    {
+      "name": "semantica-cursor",
+      "description": "Semantica plugin for Cursor: knowledge graph skills and developer workflow integration.",
+      "path": "."
+    },
+    {
+      "name": "semantica-codex",
+      "description": "Semantica plugin for Codex: knowledge graph commands, analytics, and export capabilities.",
+      "path": "."
+    }
+  ]
+}

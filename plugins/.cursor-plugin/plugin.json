@@ -1,0 +1,11 @@
+{
+  "name": "semantica-cursor",
+  "description": "Semantica plugin for Cursor: knowledge graph skills, reasoning, extraction, and visualization.",
+  "version": "0.1.0",
+  "author": {"name": "Semantica Contributors"},
+  "homepage": "https://github.com/Hawksight-AI/semantica",
+  "repository": "https://github.com/Hawksight-AI/semantica",
+  "platforms": ["cursor"],
+  "keywords": ["semantica", "knowledge graph", "cursor", "visualization", "reasoning", "extraction", "mcp"],
+  "license": "MIT"
+}

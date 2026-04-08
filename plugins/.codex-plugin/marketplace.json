@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    {
+      "name": "semantica-codex",
+      "description": "Semantica plugin for Codex: knowledge graph commands and analytics.",
+      "path": "."
+    }
+  ]
+}

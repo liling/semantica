@@ -5,6 +5,9 @@ import type Sigma from "sigma";
 import { graph, type EdgeAttributes, type NodeAttributes } from "../../../store/graphStore";
 import type { GraphTheme } from "../graphTheme";
 import type {
+  GraphDiagnosticsSnapshot,
+  GraphEffectsState,
+  GraphEffectToggle,
   GraphInteractionState,
   GraphLoadSummary,
   GraphSelectedNodeState,
@@ -31,6 +34,8 @@ export type GraphPluginActionRequest =
   | { type: "focusNode"; nodeId: string }
   | { type: "selectNode"; nodeId: string }
   | { type: "setViewMode"; viewMode: GraphViewMode }
+  | { type: "toggleEffect"; effect: GraphEffectToggle }
+  | { type: "setEffect"; effect: GraphEffectToggle; enabled: boolean }
   | { type: "togglePanel"; panelId: string }
   | { type: "openPanel"; panelId: string }
   | { type: "closePanel"; panelId: string };
@@ -78,6 +83,8 @@ export interface GraphPluginContext {
   getInspectorState: () => GraphInspectorState;
   getGraphSummary: () => GraphLoadSummary | null;
   getTemporalState: () => GraphTemporalState | null;
+  getEffectsState: () => GraphEffectsState;
+  getDiagnosticsSnapshot: () => GraphDiagnosticsSnapshot | null;
   isPanelOpen: (panelId: string) => boolean;
   dispatchAction: (action: GraphPluginActionRequest) => void;
 }

@@ -15,6 +15,7 @@ import {
 import { GRAPH_THEME } from "./graphConfig";
 import type {
   GraphDataSnapshot,
+  GraphEffectsState,
   GraphLayoutSource,
   GraphLayoutStatus,
   GraphLoadProgress,
@@ -23,6 +24,16 @@ import type {
   GraphStageHandle,
   GraphViewMode,
 } from "./types";
+
+const STAGE_EFFECTS_STATE: GraphEffectsState = {
+  pathPulseEnabled: false,
+  pathFlowEnabled: false,
+  lensEnabled: false,
+  legendEnabled: false,
+  diagnosticsEnabled: false,
+  lensMode: "neighborhood",
+  effectQuality: "bounded",
+};
 
 const socketProtocol = () => (window.location.protocol === "https:" ? "wss:" : "ws:");
 
@@ -414,6 +425,7 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
         onNodeClick={onNodeSelect}
         selectedNodeId={selectedNodeId}
         activePath={activePath}
+        effectsState={STAGE_EFFECTS_STATE}
         isLayoutRunning={isLayoutRunning}
         onLayoutRunningChange={onLayoutRunningChange}
         layoutSource={runtimeLayoutSource}

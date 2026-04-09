@@ -20,6 +20,46 @@ export interface GraphInteractionState {
   isLayoutRunning: boolean;
 }
 
+export type GraphEffectToggle =
+  | "pathPulseEnabled"
+  | "pathFlowEnabled"
+  | "lensEnabled"
+  | "legendEnabled"
+  | "diagnosticsEnabled";
+
+export interface GraphEffectsState {
+  pathPulseEnabled: boolean;
+  pathFlowEnabled: boolean;
+  lensEnabled: boolean;
+  legendEnabled: boolean;
+  diagnosticsEnabled: boolean;
+  lensMode: "neighborhood";
+  effectQuality: "bounded";
+}
+
+export interface GraphEffectAvailability {
+  enabled: boolean;
+  available: boolean;
+  reason: string;
+  detail?: string;
+  visibleSegments?: number;
+  segmentCap?: number;
+}
+
+export interface GraphDiagnosticsSnapshot {
+  interactionState: GraphInteractionState;
+  activePluginIds: string[];
+  openPanelIds: string[];
+  effectsState: GraphEffectsState;
+  effectAvailability: {
+    pathPulse: GraphEffectAvailability;
+    pathFlow: GraphEffectAvailability;
+    lens: GraphEffectAvailability;
+    legend: GraphEffectAvailability;
+    diagnostics: GraphEffectAvailability;
+  };
+}
+
 export interface ApiNode {
   id: string;
   type: string;

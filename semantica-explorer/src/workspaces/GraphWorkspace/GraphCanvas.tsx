@@ -26,7 +26,14 @@ import {
   withAlpha,
   zoomTierAtLeast,
 } from "./graphTheme";
-import type { GraphCameraState, GraphInteractionState, GraphLayoutStatus, GraphViewMode } from "./types";
+import type {
+  GraphCameraState,
+  GraphDiagnosticsSnapshot,
+  GraphEffectsState,
+  GraphInteractionState,
+  GraphLayoutStatus,
+  GraphViewMode,
+} from "./types";
 import type { GraphPluginRuntime } from "./plugins";
 
 export type { GraphViewMode } from "./types";
@@ -41,6 +48,7 @@ export interface GraphCanvasProps {
   onNodeClick: (nodeId: string) => void;
   selectedNodeId: string;
   activePath?: string[];
+  effectsState: GraphEffectsState;
   isLayoutRunning: boolean;
   onLayoutRunningChange?: (running: boolean) => void;
   layoutSource?: string;
@@ -51,6 +59,7 @@ export interface GraphCanvasProps {
   pluginOverlays?: ReactNode[];
   onPluginRuntimeChange?: (runtime: GraphPluginRuntime | null) => void;
   onInteractionStateChange?: (interactionState: GraphInteractionState) => void;
+  onDiagnosticsChange?: (effectAvailability: GraphDiagnosticsSnapshot["effectAvailability"]) => void;
 }
 
 const FA2_SETTINGS = {
@@ -109,6 +118,17 @@ type ResolvedEdgeStyle = {
   drawCurvedOverlay: boolean;
 };
 
+type ViewportPoint = { x: number; y: number };
+type PathSegmentOverlay = {
+  sourceId: string;
+  targetId: string;
+  source: ViewportPoint;
+  target: ViewportPoint;
+  color: string;
+  size: number;
+  curveStrength: number;
+};
+
 function buildPathEdgeSet(path: string[]): Set<string> {
   const edgeIds = new Set<string>();
   for (let index = 0; index < path.length - 1; index += 1) {
@@ -116,6 +136,166 @@ function buildPathEdgeSet(path: string[]): Set<string> {
     edgeIds.add(`${path[index + 1]}::${path[index]}`);
   }
   return edgeIds;
+}
+
+function isPointNearViewport(point: ViewportPoint, width: number, height: number, padding = 96) {
+  return point.x >= -padding
+    && point.y >= -padding
+    && point.x <= width + padding
+    && point.y <= height + padding;
+}
+
+function collectPathSegments(
+  sigma: Sigma,
+  path: string[],
+  zoomTier: GraphZoomTier,
+  viewportWidth: number,
+  viewportHeight: number,
+): PathSegmentOverlay[] {
+  const segments: PathSegmentOverlay[] = [];
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const sourceId = path[index];
+    const targetId = path[index + 1];
+    const sourceData = sigma.getNodeDisplayData(sourceId);
+    const targetData = sigma.getNodeDisplayData(targetId);
+    if (!sourceData || !targetData) {
+      continue;
+    }
+
+    const source = sigma.graphToViewport({ x: sourceData.x, y: sourceData.y });
+    const target = sigma.graphToViewport({ x: targetData.x, y: targetData.y });
+    if (!isPointNearViewport(source, viewportWidth, viewportHeight) && !isPointNearViewport(target, viewportWidth, viewportHeight)) {
+      continue;
+    }
+
+    const attrs = graph.hasDirectedEdge(sourceId, targetId)
+      ? (graph.getDirectedEdgeAttributes(sourceId, targetId) as EdgeAttributes)
+      : ({
+          baseColor: GRAPH_THEME.palette.accent.path,
+          baseSize: 1.2,
+          edgeVariant: "pathSignal",
+          arrowVisibilityPolicy: "always",
+        } as EdgeAttributes);
+    const pathStyle = resolveEdgeElementStyle(GRAPH_THEME, zoomTier, "path", attrs);
+    if (!pathStyle.color || !pathStyle.size) {
+      continue;
+    }
+
+    segments.push({
+      sourceId,
+      targetId,
+      source,
+      target,
+      color: pathStyle.color,
+      size: pathStyle.size,
+      curveStrength: pathStyle.curveStrength || GRAPH_THEME.edges.variants.pathSignal.curveStrength,
+    });
+  }
+
+  return segments;
+}
+
+function buildEffectAvailability(
+  interactionState: GraphInteractionState,
+  effectsState: GraphEffectsState,
+  sigma: Sigma | null,
+  viewportWidth: number,
+  viewportHeight: number,
+): GraphDiagnosticsSnapshot["effectAvailability"] {
+  const visiblePathSegments = sigma
+    ? collectPathSegments(sigma, interactionState.activePath, interactionState.zoomTier, viewportWidth, viewportHeight).length
+    : 0;
+  const hasActivePath = interactionState.activePath.length > 1;
+  const pulseTierReady = zoomTierAtLeast(interactionState.zoomTier, GRAPH_THEME.effects.pathPulse.minZoomTier);
+  const flowTierReady = zoomTierAtLeast(interactionState.zoomTier, GRAPH_THEME.effects.pathFlow.minZoomTier);
+  const lensTierReady = zoomTierAtLeast(interactionState.zoomTier, GRAPH_THEME.effects.lens.minZoomTier);
+  const hasPrimaryNode = Boolean(interactionState.hoveredNodeId || interactionState.selectedNodeId);
+
+  const pathPulse = !effectsState.pathPulseEnabled
+    ? { enabled: false, available: false, reason: "Disabled by toggle" }
+    : !hasActivePath
+      ? { enabled: true, available: false, reason: "No active path" }
+      : !pulseTierReady
+        ? {
+            enabled: true,
+            available: false,
+            reason: "Disabled by zoom tier",
+            detail: `Requires ${GRAPH_THEME.effects.pathPulse.minZoomTier}`,
+          }
+        : visiblePathSegments === 0
+          ? { enabled: true, available: false, reason: "Path is off-screen" }
+          : visiblePathSegments > GRAPH_THEME.effects.pathPulse.maxSegments
+            ? {
+                enabled: true,
+                available: false,
+                reason: "Disabled by path size cap",
+                detail: `${visiblePathSegments} visible segments`,
+                visibleSegments: visiblePathSegments,
+                segmentCap: GRAPH_THEME.effects.pathPulse.maxSegments,
+              }
+            : {
+                enabled: true,
+                available: true,
+                reason: "Ready",
+                visibleSegments: visiblePathSegments,
+                segmentCap: GRAPH_THEME.effects.pathPulse.maxSegments,
+              };
+
+  const pathFlow = !effectsState.pathFlowEnabled
+    ? { enabled: false, available: false, reason: "Disabled by toggle" }
+    : !hasActivePath
+      ? { enabled: true, available: false, reason: "No active path" }
+      : !flowTierReady
+        ? {
+            enabled: true,
+            available: false,
+            reason: "Disabled by zoom tier",
+            detail: `Requires ${GRAPH_THEME.effects.pathFlow.minZoomTier}`,
+          }
+        : visiblePathSegments === 0
+          ? { enabled: true, available: false, reason: "Path is off-screen" }
+          : visiblePathSegments > GRAPH_THEME.effects.pathFlow.maxSegments
+            ? {
+                enabled: true,
+                available: false,
+                reason: "Disabled by path size cap",
+                detail: `${visiblePathSegments} visible segments`,
+                visibleSegments: visiblePathSegments,
+                segmentCap: GRAPH_THEME.effects.pathFlow.maxSegments,
+              }
+            : {
+                enabled: true,
+                available: true,
+                reason: "Ready",
+                visibleSegments: visiblePathSegments,
+                segmentCap: GRAPH_THEME.effects.pathFlow.maxSegments,
+              };
+
+  const lens = !effectsState.lensEnabled
+    ? { enabled: false, available: false, reason: "Disabled by toggle" }
+    : !hasPrimaryNode
+      ? { enabled: true, available: false, reason: "No focal node" }
+      : !lensTierReady
+        ? {
+            enabled: true,
+            available: false,
+            reason: "Disabled by zoom tier",
+            detail: `Requires ${GRAPH_THEME.effects.lens.minZoomTier}`,
+          }
+        : { enabled: true, available: true, reason: "Ready" };
+
+  const legend = effectsState.legendEnabled
+    ? { enabled: true, available: true, reason: "Panel enabled" }
+    : { enabled: false, available: false, reason: "Disabled by toggle" };
+
+  const diagnostics = !GRAPH_THEME.effects.diagnostics.enabledInDev
+    ? { enabled: false, available: false, reason: "Disabled in production" }
+    : effectsState.diagnosticsEnabled
+      ? { enabled: true, available: true, reason: "Ready" }
+      : { enabled: false, available: false, reason: "Disabled by toggle" };
+
+  return { pathPulse, pathFlow, lens, legend, diagnostics };
 }
 
 function getEdgeWeightBetween(source: string, target: string): number {
@@ -676,6 +856,126 @@ function drawCurvedEdge(
   context.stroke();
 }
 
+function drawPathPulseOverlay(
+  context: CanvasRenderingContext2D,
+  segments: PathSegmentOverlay[],
+  now: number,
+) {
+  segments.forEach((segment, index) => {
+    const t = ((now * GRAPH_THEME.effects.pathPulse.speed) + index * 0.17) % 1;
+    const x = segment.source.x + (segment.target.x - segment.source.x) * t;
+    const y = segment.source.y + (segment.target.y - segment.source.y) * t;
+    const glow = context.createRadialGradient(x, y, 0, x, y, GRAPH_THEME.effects.pathPulse.radius);
+    glow.addColorStop(0, withAlpha(GRAPH_THEME.palette.accent.path, GRAPH_THEME.effects.pathPulse.glowAlpha));
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    context.fillStyle = glow;
+    context.beginPath();
+    context.arc(x, y, GRAPH_THEME.effects.pathPulse.radius, 0, Math.PI * 2);
+    context.fill();
+  });
+}
+
+function drawPathFlowAccentOverlay(
+  context: CanvasRenderingContext2D,
+  segments: PathSegmentOverlay[],
+  now: number,
+) {
+  segments.forEach((segment, index) => {
+    const t = ((now * GRAPH_THEME.effects.pathFlow.speed) + index * GRAPH_THEME.effects.pathFlow.spacing) % 1;
+    const headX = segment.source.x + (segment.target.x - segment.source.x) * t;
+    const headY = segment.source.y + (segment.target.y - segment.source.y) * t;
+    const tailT = Math.max(0, t - 0.08);
+    const tailX = segment.source.x + (segment.target.x - segment.source.x) * tailT;
+    const tailY = segment.source.y + (segment.target.y - segment.source.y) * tailT;
+
+    context.strokeStyle = withAlpha(segment.color, 0.28);
+    context.lineWidth = Math.max(segment.size + 3.6, 4.6);
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(tailX, tailY);
+    context.lineTo(headX, headY);
+    context.stroke();
+
+    context.strokeStyle = withAlpha(GRAPH_THEME.palette.accent.selected, GRAPH_THEME.effects.pathFlow.opacity);
+    context.lineWidth = Math.max(segment.size + 1.3, 2.4);
+    context.beginPath();
+    context.moveTo(tailX, tailY);
+    context.lineTo(headX, headY);
+    context.stroke();
+
+    drawGlowHalo(
+      context,
+      headX,
+      headY,
+      GRAPH_THEME.effects.pathFlow.radius,
+      withAlpha(GRAPH_THEME.palette.accent.selected, 0.32),
+    );
+  });
+}
+
+function drawNeighborhoodLensOverlay(
+  context: CanvasRenderingContext2D,
+  sigma: Sigma,
+  primaryNodeId: string,
+  focusIds: Set<string>,
+) {
+  const primaryData = sigma.getNodeDisplayData(primaryNodeId);
+  if (!primaryData) {
+    return;
+  }
+
+  const center = sigma.graphToViewport({ x: primaryData.x, y: primaryData.y });
+  drawGlowHalo(
+    context,
+    center.x,
+    center.y,
+    GRAPH_THEME.effects.lens.radius,
+    withAlpha(GRAPH_THEME.palette.accent.hovered, GRAPH_THEME.effects.lens.glowAlpha),
+  );
+
+  focusIds.forEach((neighborId) => {
+    if (neighborId === primaryNodeId || !graph.hasNode(neighborId)) {
+      return;
+    }
+
+    if (
+      !graph.hasDirectedEdge(primaryNodeId, neighborId)
+      && !graph.hasDirectedEdge(neighborId, primaryNodeId)
+    ) {
+      return;
+    }
+
+    const neighborData = sigma.getNodeDisplayData(neighborId);
+    if (!neighborData) {
+      return;
+    }
+
+    const neighborPoint = sigma.graphToViewport({ x: neighborData.x, y: neighborData.y });
+    context.strokeStyle = withAlpha(GRAPH_THEME.palette.accent.hovered, GRAPH_THEME.effects.lens.edgeAlpha * 0.38);
+    context.lineWidth = GRAPH_THEME.effects.lens.edgeLineWidth + 3.2;
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(center.x, center.y);
+    context.lineTo(neighborPoint.x, neighborPoint.y);
+    context.stroke();
+
+    context.strokeStyle = withAlpha(GRAPH_THEME.palette.accent.hovered, GRAPH_THEME.effects.lens.edgeAlpha);
+    context.lineWidth = GRAPH_THEME.effects.lens.edgeLineWidth;
+    context.beginPath();
+    context.moveTo(center.x, center.y);
+    context.lineTo(neighborPoint.x, neighborPoint.y);
+    context.stroke();
+
+    drawGlowHalo(
+      context,
+      neighborPoint.x,
+      neighborPoint.y,
+      GRAPH_THEME.effects.lens.feather * 0.18,
+      withAlpha(GRAPH_THEME.palette.accent.hovered, 0.12),
+    );
+  });
+}
+
 function applySceneState(
   sigma: Sigma,
   interactionState: GraphInteractionState,
@@ -760,6 +1060,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       onNodeClick,
       selectedNodeId,
       activePath = [],
+      effectsState,
       isLayoutRunning,
       viewMode,
       className,
@@ -767,6 +1068,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       pluginOverlays = [],
       onPluginRuntimeChange,
       onInteractionStateChange,
+      onDiagnosticsChange,
     },
     ref,
   ) {
@@ -977,6 +1279,23 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     }, [behaviors, getBehaviorContext, interactionState, onInteractionStateChange]);
 
     useEffect(() => {
+      if (!onDiagnosticsChange) {
+        return;
+      }
+
+      const sigma = sigmaRef.current;
+      const container = containerRef.current;
+      const availability = buildEffectAvailability(
+        interactionState,
+        effectsState,
+        sigma,
+        container?.clientWidth ?? 0,
+        container?.clientHeight ?? 0,
+      );
+      onDiagnosticsChange(availability);
+    }, [effectsState, interactionState, onDiagnosticsChange]);
+
+    useEffect(() => {
       const sigma = sigmaRef.current;
       if (!sigma || displayGraph !== graph) {
         return;
@@ -1016,7 +1335,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         const primaryNodeId = interactionState.hoveredNodeId || interactionState.selectedNodeId;
         const focusIds = primaryNodeId && graph.hasNode(primaryNodeId) ? buildFocusSet(primaryNodeId) : new Set<string>();
         const pathNodeIds = new Set(interactionState.activePath);
-        const edgePairs = buildPathEdgeSet(interactionState.activePath);
+        const pathSegments = collectPathSegments(sigma, interactionState.activePath, interactionState.zoomTier, rect.width, rect.height);
+        const effectAvailability = buildEffectAvailability(
+          interactionState,
+          effectsState,
+          sigma,
+          rect.width,
+          rect.height,
+        );
         const nodesToDecorate = new Set<string>([
           ...focusIds,
           ...pathNodeIds,
@@ -1065,6 +1391,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           }
         });
 
+        if (primaryNodeId && effectAvailability.lens.available) {
+          drawNeighborhoodLensOverlay(context, sigma, primaryNodeId, focusIds);
+        }
+
         if (GRAPH_THEME.zoomTiers[interactionState.zoomTier].showCurves && primaryNodeId) {
           const drawnPairs = new Set<string>();
           focusIds.forEach((sourceId) => {
@@ -1111,47 +1441,26 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           });
         }
 
-        if (interactionState.activePath.length > 1) {
-          for (let index = 0; index < interactionState.activePath.length - 1; index += 1) {
-            const sourceId = interactionState.activePath[index];
-            const targetId = interactionState.activePath[index + 1];
-            if (!edgePairs.has(`${sourceId}::${targetId}`)) continue;
-            const sourceData = sigma.getNodeDisplayData(sourceId);
-            const targetData = sigma.getNodeDisplayData(targetId);
-            if (!sourceData || !targetData) continue;
-            const source = sigma.graphToViewport({ x: sourceData.x, y: sourceData.y });
-            const target = sigma.graphToViewport({ x: targetData.x, y: targetData.y });
-            const attrs = graph.hasDirectedEdge(sourceId, targetId)
-              ? (graph.getDirectedEdgeAttributes(sourceId, targetId) as EdgeAttributes)
-              : ({
-                  baseColor: GRAPH_THEME.palette.accent.path,
-                  baseSize: 1.2,
-                  edgeVariant: "pathSignal",
-                  arrowVisibilityPolicy: "always",
-                } as EdgeAttributes);
-            const pathStyle = resolveEdgeElementStyle(GRAPH_THEME, interactionState.zoomTier, "path", attrs);
-            if (pathStyle.color && pathStyle.size) {
-              drawCurvedEdge(
-                context,
-                source,
-                target,
-                pathStyle.color,
-                Math.max(pathStyle.size, GRAPH_THEME.overlays.curveLineWidth + 0.4),
-                pathStyle.curveStrength || GRAPH_THEME.edges.variants.pathSignal.curveStrength,
-                GRAPH_THEME.edges.variants.pathSignal.glowAlpha,
-              );
-            }
-            const t = ((now * 0.22) + index * 0.17) % 1;
-            const x = source.x + (target.x - source.x) * t;
-            const y = source.y + (target.y - source.y) * t;
-            const glow = context.createRadialGradient(x, y, 0, x, y, GRAPH_THEME.overlays.pulseRadius);
-            glow.addColorStop(0, GRAPH_THEME.palette.accent.path);
-            glow.addColorStop(1, "rgba(0,0,0,0)");
-            context.fillStyle = glow;
-            context.beginPath();
-            context.arc(x, y, GRAPH_THEME.overlays.pulseRadius, 0, Math.PI * 2);
-            context.fill();
-          }
+        if (pathSegments.length > 0) {
+          pathSegments.forEach((segment) => {
+            drawCurvedEdge(
+              context,
+              segment.source,
+              segment.target,
+              segment.color,
+              Math.max(segment.size, GRAPH_THEME.overlays.curveLineWidth + 0.4),
+              segment.curveStrength,
+              GRAPH_THEME.edges.variants.pathSignal.glowAlpha,
+            );
+          });
+        }
+
+        if (effectAvailability.pathFlow.available) {
+          drawPathFlowAccentOverlay(context, pathSegments, now);
+        }
+
+        if (effectAvailability.pathPulse.available) {
+          drawPathPulseOverlay(context, pathSegments, now);
         }
 
         frame = window.requestAnimationFrame(draw);
@@ -1161,7 +1470,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       return () => {
         window.cancelAnimationFrame(frame);
       };
-    }, [interactionState]);
+    }, [effectsState, interactionState]);
 
     useEffect(() => {
       if (selectedNodeId || isFocusedView) {

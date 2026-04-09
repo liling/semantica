@@ -1,3 +1,4 @@
+export { explorationEffectsPlugin } from "./explorationEffectsPlugin";
 export { legendPlugin } from "./legendPlugin";
 export { neighborhoodPanelPlugin } from "./neighborhoodPanelPlugin";
 export { temporalOverlayPlugin } from "./temporalOverlayPlugin";

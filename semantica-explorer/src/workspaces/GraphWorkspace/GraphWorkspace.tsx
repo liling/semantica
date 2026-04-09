@@ -10,7 +10,7 @@ import { useLoadGraph, useReloadGraph } from "./useLoadGraph";
 import type { GraphLoadProgress } from "./useLoadGraph";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import {
-  legendPlugin,
+  explorationEffectsPlugin,
   neighborhoodPanelPlugin,
   temporalOverlayPlugin,
   type GraphPlugin,
@@ -22,7 +22,14 @@ import {
   type GraphPluginRuntime,
   type GraphPluginToolbarItem,
 } from "./plugins";
-import type { GraphInteractionState, GraphLoadSummary, GraphSelectedNodeState } from "./types";
+import type {
+  GraphDiagnosticsSnapshot,
+  GraphEffectToggle,
+  GraphEffectsState,
+  GraphInteractionState,
+  GraphLoadSummary,
+  GraphSelectedNodeState,
+} from "./types";
 
 type SearchResult = {
   node: {
@@ -72,6 +79,15 @@ type GraphToolbarGroup = {
 };
 
 const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
+const DEFAULT_EFFECTS_STATE: GraphEffectsState = {
+  pathPulseEnabled: false,
+  pathFlowEnabled: false,
+  lensEnabled: false,
+  legendEnabled: false,
+  diagnosticsEnabled: false,
+  lensMode: "neighborhood",
+  effectQuality: "bounded",
+};
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -876,12 +892,14 @@ export function GraphWorkspace() {
   const [scrubberTime, setScrubberTime] = useState<Date | null>(null);
   const [loadingProgress, setLoadingProgress] = useState<GraphLoadProgress | null>(null);
   const [pluginPanelState, setPluginPanelState] = useState<Record<string, boolean>>({
-    "legend-panel": false,
+    "effects-panel": false,
     "neighborhood-panel": false,
     "temporal-panel": false,
   });
   const [activeDockPanelId, setActiveDockPanelId] = useState<string | null>(null);
   const [pluginRuntimeVersion, setPluginRuntimeVersion] = useState(0);
+  const [effectsState, setEffectsState] = useState<GraphEffectsState>(DEFAULT_EFFECTS_STATE);
+  const [graphDiagnosticsState, setGraphDiagnosticsState] = useState<GraphDiagnosticsSnapshot["effectAvailability"] | null>(null);
 
   const debouncedTime = useDebounce(scrubberTime, 150);
   const prevActiveIdsRef = useRef<Set<string>>(new Set());
@@ -1148,7 +1166,7 @@ export function GraphWorkspace() {
 
   const pluginRegistry = useMemo<GraphPluginRegistryEntry[]>(
     () => [
-      { plugin: legendPlugin, enabled: true },
+      { plugin: explorationEffectsPlugin, enabled: true },
       { plugin: neighborhoodPanelPlugin, enabled: true },
       { plugin: temporalOverlayPlugin, enabled: true },
     ],
@@ -1158,6 +1176,22 @@ export function GraphWorkspace() {
     () => pluginRegistry.filter((entry) => entry.enabled !== false).map((entry) => entry.plugin),
     [pluginRegistry],
   );
+
+  const setEffectToggle = useCallback((effect: GraphEffectToggle, enabled: boolean | ((current: boolean) => boolean)) => {
+    setEffectsState((current) => {
+      const nextValue = typeof enabled === "function" ? enabled(current[effect]) : enabled;
+      if (effect === "diagnosticsEnabled" && !GRAPH_THEME.effects.diagnostics.enabledInDev) {
+        return current;
+      }
+      if (current[effect] === nextValue) {
+        return current;
+      }
+      return {
+        ...current,
+        [effect]: nextValue,
+      };
+    });
+  }, []);
 
   const handlePluginAction = useCallback((action: GraphPluginActionRequest) => {
     switch (action.type) {
@@ -1172,6 +1206,12 @@ export function GraphWorkspace() {
         return;
       case "setViewMode":
         setViewMode(action.viewMode);
+        return;
+      case "toggleEffect":
+        setEffectToggle(action.effect, (current) => !current);
+        return;
+      case "setEffect":
+        setEffectToggle(action.effect, action.enabled);
         return;
       case "togglePanel":
         setPluginPanelState((current) => {
@@ -1203,7 +1243,23 @@ export function GraphWorkspace() {
         setActiveDockPanelId((previous) => (previous === action.panelId ? null : previous));
         return;
     }
-  }, [focusNode]);
+  }, [focusNode, setEffectToggle]);
+
+  const diagnosticsSnapshot = useMemo<GraphDiagnosticsSnapshot | null>(() => {
+    if (!GRAPH_THEME.effects.diagnostics.enabledInDev || !graphDiagnosticsState) {
+      return null;
+    }
+
+    return {
+      interactionState: pluginInteractionStateRef.current,
+      activePluginIds: activePlugins.map((plugin) => plugin.id),
+      openPanelIds: Object.entries(pluginPanelState)
+        .filter(([, isOpen]) => isOpen)
+        .map(([panelId]) => panelId),
+      effectsState,
+      effectAvailability: graphDiagnosticsState,
+    };
+  }, [activePlugins, effectsState, graphDiagnosticsState, pluginPanelState]);
 
   const pluginContext = useMemo<GraphPluginContext>(() => ({
     get sigma() {
@@ -1224,9 +1280,20 @@ export function GraphWorkspace() {
     }),
     getGraphSummary: () => graphSummary,
     getTemporalState: () => temporalState,
+    getEffectsState: () => effectsState,
+    getDiagnosticsSnapshot: () => diagnosticsSnapshot,
     isPanelOpen: (panelId: string) => Boolean(pluginPanelState[panelId]),
     dispatchAction: handlePluginAction,
-  }), [graphSummary, handlePluginAction, pluginPanelState, selectedNodeId, selectedNodeState, temporalState]);
+  }), [
+    diagnosticsSnapshot,
+    effectsState,
+    graphSummary,
+    handlePluginAction,
+    pluginPanelState,
+    selectedNodeId,
+    selectedNodeState,
+    temporalState,
+  ]);
 
   const handlePluginRuntimeChange = useCallback((runtime: GraphPluginRuntime | null) => {
     pluginRuntimeRef.current = runtime;
@@ -1243,6 +1310,13 @@ export function GraphWorkspace() {
       }
     }
   }, [activePlugins, pluginContext]);
+
+  const handleDiagnosticsChange = useCallback((effectAvailability: GraphDiagnosticsSnapshot["effectAvailability"]) => {
+    if (!GRAPH_THEME.effects.diagnostics.enabledInDev) {
+      return;
+    }
+    setGraphDiagnosticsState(effectAvailability);
+  }, []);
 
   useEffect(() => {
     if (!pluginRuntimeRef.current) {
@@ -1490,12 +1564,14 @@ export function GraphWorkspace() {
                     onNodeClick={focusNode}
                     selectedNodeId={selectedNodeId}
                     activePath={activePath}
+                    effectsState={effectsState}
                     isLayoutRunning={isLayoutRunning}
                     viewMode={viewMode}
                     showFitViewButton={false}
                     pluginOverlays={pluginOverlays.map((overlay) => overlay.element)}
                     onPluginRuntimeChange={handlePluginRuntimeChange}
                     onInteractionStateChange={handleInteractionStateChange}
+                    onDiagnosticsChange={handleDiagnosticsChange}
                   />
                   {showLoadingOverlay ? (
                     <LoadingOverlay progress={loadingProgress} showGraphBehind={hasGraphContent} />

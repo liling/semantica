@@ -136,6 +136,37 @@ export interface GraphTheme {
   motion: {
     cameraMs: number;
   };
+  effects: {
+    pathPulse: {
+      minZoomTier: GraphZoomTier;
+      maxSegments: number;
+      speed: number;
+      radius: number;
+      glowAlpha: number;
+    };
+    pathFlow: {
+      minZoomTier: GraphZoomTier;
+      maxSegments: number;
+      speed: number;
+      spacing: number;
+      opacity: number;
+      radius: number;
+    };
+    lens: {
+      minZoomTier: GraphZoomTier;
+      radius: number;
+      feather: number;
+      glowAlpha: number;
+      edgeAlpha: number;
+      edgeLineWidth: number;
+    };
+    legend: {
+      maxGroups: number;
+    };
+    diagnostics: {
+      enabledInDev: boolean;
+    };
+  };
 }
 
 export const GRAPH_THEME: GraphTheme = {
@@ -304,6 +335,37 @@ export const GRAPH_THEME: GraphTheme = {
   },
   motion: {
     cameraMs: 380,
+  },
+  effects: {
+    pathPulse: {
+      minZoomTier: "structure",
+      maxSegments: 18,
+      speed: 0.22,
+      radius: 11,
+      glowAlpha: 0.92,
+    },
+    pathFlow: {
+      minZoomTier: "structure",
+      maxSegments: 14,
+      speed: 0.36,
+      spacing: 0.26,
+      opacity: 0.92,
+      radius: 3.8,
+    },
+    lens: {
+      minZoomTier: "structure",
+      radius: 136,
+      feather: 78,
+      glowAlpha: 0.18,
+      edgeAlpha: 0.42,
+      edgeLineWidth: 1.8,
+    },
+    legend: {
+      maxGroups: 8,
+    },
+    diagnostics: {
+      enabledInDev: import.meta.env.DEV,
+    },
   },
 };
 

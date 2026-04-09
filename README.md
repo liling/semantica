@@ -53,6 +53,19 @@ pip install semantica
 
 ---
 
+## Plugins (Claude, Cursor, Codex)
+
+Semantica includes a cross-platform plugin bundle under `plugins/` for community use:
+
+- 17 domain skills (context graphs, decision intelligence, explainability, reasoning, provenance, ontology, temporal, visualization)
+- Specialized agents (`decision-advisor`, `explainability`, `kg-assistant`)
+- Hook configuration and platform-specific manifests for Claude, Cursor, and Codex
+
+See the community setup guide:
+
+- [`plugins/.claude-plugin/README.md`](plugins/.claude-plugin/README.md)
+
+---
 
 ## Features
 

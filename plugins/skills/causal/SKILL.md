@@ -17,13 +17,22 @@ Build and inspect causal chains for a subject or category.
 
 ```python
 from semantica.context.causal_analyzer import CausalChainAnalyzer
-from semantica.context import ContextGraph
+from semantica.context import AgentContext
 
-graph = ContextGraph(advanced_analytics=True)
-analyzer = CausalChainAnalyzer(graph=graph)
+# Option 1: Use an existing AgentContext decision backend
+chain = ctx.get_causal_chain(
+    decision_id=decision_id,
+    direction="upstream",
+    max_depth=depth,
+)
 
-chain = analyzer.build_causal_chain(subject=subject, depth=depth)
-metrics = analyzer.compute_causal_metrics(chain)
+# Option 2: Use CausalChainAnalyzer directly
+analyzer = CausalChainAnalyzer(graph_store=ctx.knowledge_graph)
+downstream = analyzer.get_causal_chain(
+    decision_id=decision_id,
+    direction="downstream",
+    max_depth=depth,
+)
 ```
 
 Output: chain steps, cause strength, effect reach, and summary graph.
@@ -32,22 +41,34 @@ Output: chain steps, cause strength, effect reach, and summary graph.
 
 ## `intervene <node> <action> [--scenario <json>]`
 
-Simulate an intervention on a node and measure downstream effects.
+Analyze decision impact and influenced decisions (current causal API).
 
 ```python
-result = analyzer.simulate_intervention(node=node, action=action, scenario=scenario)
+analyzer = CausalChainAnalyzer(graph_store=ctx.knowledge_graph)
+impact_score = analyzer.get_causal_impact_score(decision_id=decision_id)
+influenced = analyzer.get_influenced_decisions(
+    decision_id=decision_id,
+    max_depth=depth,
+)
 ``` 
 
-Return: effect magnitudes, changed outcomes, and intervention recommendations.
+Return: impact score, influenced decisions, and downstream scope.
 
 ---
 
 ## `counterfactual <fact> [--weight N]`
 
-Generate counterfactual explanations and alternate outcomes.
+Trace root causes and temporal causal paths.
 
 ```python
-counterfactuals = analyzer.generate_counterfactuals(fact=fact)
+analyzer = CausalChainAnalyzer(graph_store=ctx.knowledge_graph)
+roots = analyzer.find_root_causes(decision_id=decision_id, max_depth=depth)
+historical_chain = analyzer.trace_at_time(
+    event_id=decision_id,
+    at_time="2026-01-01T00:00:00Z",
+    direction="upstream",
+    max_depth=depth,
+)
 ```
 
-Output: alternate causal paths, likelihood change, and decision impact.
+Output: root decision lineage and time-bounded causal context.

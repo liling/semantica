@@ -16,10 +16,14 @@ Produce explanations for decisions, rules, and graph analytics. Usage: `/semanti
 Explain why a decision was reached.
 
 ```python
-from semantica.explain import Explainer
+from semantica.reasoning.explanation_generator import ExplanationGenerator
 
-explainer = Explainer()
-explanation = explainer.explain_decision(decision_id=decision_id, detail=detail)
+# For decision explainability in Semantica contexts:
+decision_trace = ctx.trace_decision_explainability(decision_id=decision_id)
+
+# For reasoning/proof explanations:
+generator = ExplanationGenerator(detail_level=detail)
+explanation = generator.generate_explanation(reasoning_result)
 ```
 
 Output: decision factors, rule traces, confidence, and suggested next steps.
@@ -31,7 +35,10 @@ Output: decision factors, rule traces, confidence, and suggested next steps.
 Explain graph relationships and why a node is connected.
 
 ```python
-explanation = explainer.explain_graph_connection(node_id=node_id, depth=depth)
+# Use AgentContext explainability + causal tracing for graph-connected decisions
+graph_explanation = ctx.trace_decision_explainability(decision_id=node_id)
+upstream = ctx.get_causal_chain(decision_id=node_id, direction="upstream", max_depth=depth)
+downstream = ctx.get_causal_chain(decision_id=node_id, direction="downstream", max_depth=depth)
 ```
 
 Return: cause/effect chains, supporting evidence, and relevant metadata.

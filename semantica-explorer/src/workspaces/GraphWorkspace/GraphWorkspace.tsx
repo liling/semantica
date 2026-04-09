@@ -3,25 +3,23 @@
 import { batchMergeEdges, batchMergeNodes, graph } from "../../store/graphStore";
 import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
 import { InspectorPanel, MetricChip, SurfaceCard } from "../../ui/primitives";
+import { lazy, Suspense } from "react";
 import { GraphCanvas } from "./GraphCanvas";
 import type { GraphCanvasHandle, GraphViewMode } from "./GraphCanvas";
-import { TimelinePanel } from "./TimelinePanel";
 import { useLoadGraph, useReloadGraph } from "./useLoadGraph";
 import type { GraphLoadProgress } from "./useLoadGraph";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import {
-  explorationEffectsPlugin,
-  neighborhoodPanelPlugin,
-  temporalOverlayPlugin,
   type GraphPlugin,
   type GraphPluginActionRequest,
   type GraphPluginContext,
   type GraphPluginOverlayDescriptor,
   type GraphPluginPanelDescriptor,
-  type GraphPluginRegistryEntry,
   type GraphPluginRuntime,
   type GraphPluginToolbarItem,
+  type GraphTemporalState,
 } from "./plugins";
+import type { LinkPrediction, PathResponse } from "./GraphInspectorPanel";
 import type {
   GraphDiagnosticsSnapshot,
   GraphEffectToggle,
@@ -39,18 +37,6 @@ type SearchResult = {
     properties: Record<string, unknown>;
   };
   score: number;
-};
-
-type LinkPrediction = {
-  target: string;
-  type: string;
-  label?: string;
-  score: number;
-};
-
-type PathResponse = {
-  path: string[];
-  total_weight: number;
 };
 
 type TemporalBounds = {
@@ -78,6 +64,19 @@ type GraphToolbarGroup = {
   items: GraphToolbarItem[];
 };
 
+type LazyPluginRegistryEntry = {
+  id: string;
+  panelId: string;
+  label: string;
+  title: string;
+  order: number;
+  load: () => Promise<GraphPlugin>;
+  shouldLoad: (context: {
+    panelState: Record<string, boolean>;
+    temporalState: GraphTemporalState | null;
+  }) => boolean;
+};
+
 const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
 const DEFAULT_EFFECTS_STATE: GraphEffectsState = {
   pathPulseEnabled: false,
@@ -88,6 +87,12 @@ const DEFAULT_EFFECTS_STATE: GraphEffectsState = {
   lensMode: "neighborhood",
   effectQuality: "bounded",
 };
+const LazyTimelinePanel = lazy(() => import("./TimelinePanel").then((module) => ({ default: module.TimelinePanel })));
+const LazyGraphInspectorPanel = lazy(() => import("./GraphInspectorPanel").then((module) => ({ default: module.GraphInspectorPanel })));
+
+const loadExplorationEffectsPlugin = () => import("./plugins/explorationEffectsPlugin").then((module) => module.explorationEffectsPlugin);
+const loadNeighborhoodPanelPlugin = () => import("./plugins/neighborhoodPanelPlugin").then((module) => module.neighborhoodPanelPlugin);
+const loadTemporalOverlayPlugin = () => import("./plugins/temporalOverlayPlugin").then((module) => module.temporalOverlayPlugin);
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -463,12 +468,6 @@ function LoadingOverlay({
   );
 }
 
-function sourceAttribution(properties: Record<string, unknown>) {
-  return PROVENANCE_KEYS
-    .filter((key) => key in properties)
-    .map((key) => ({ key, value: properties[key] }));
-}
-
 function getProvenanceCount(properties: Record<string, unknown>) {
   return PROVENANCE_KEYS.reduce(
     (count, key) => (properties[key] !== undefined && properties[key] !== null ? count + 1 : count),
@@ -581,24 +580,6 @@ function buildSelectedNodeState(nodeId: string): GraphSelectedNodeState | null {
   };
 }
 
-function collectPluginToolbarItems(
-  plugins: GraphPlugin[],
-  context: GraphPluginContext,
-): GraphPluginToolbarItem[] {
-  const items: GraphPluginToolbarItem[] = [];
-
-  for (const plugin of plugins) {
-    try {
-      const nextItems = plugin.toolbarItems?.(context) ?? [];
-      items.push(...nextItems);
-    } catch (error) {
-      console.error(`[GraphPlugin:${plugin.id}] toolbar collection failed`, error);
-    }
-  }
-
-  return items.sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
-}
-
 function collectPluginPanels(
   plugins: GraphPlugin[],
   context: GraphPluginContext,
@@ -654,228 +635,6 @@ function collectPluginOverlays(
   });
 }
 
-function NodePanel({
-  nodeId,
-  predictions,
-  predictionType,
-  onPredictionTypeChange,
-  onRunPredictions,
-  pathTargetId,
-  onPathTargetChange,
-  onTracePath,
-  pathResult,
-  onDownloadProvenance,
-}: {
-  nodeId: string;
-  predictions: LinkPrediction[];
-  predictionType: string;
-  onPredictionTypeChange: (value: string) => void;
-  onRunPredictions: () => void;
-  pathTargetId: string;
-  onPathTargetChange: (value: string) => void;
-  onTracePath: () => void;
-  pathResult: PathResponse | null;
-  onDownloadProvenance: (format: "json" | "markdown") => void;
-}) {
-  if (!nodeId) {
-    return (
-      <div style={{ padding: 32, textAlign: "center" }}>
-        <p style={{ color: "#8b949e", fontSize: 14, margin: 0 }}>
-          Search for a node or click one in the canvas to inspect its properties.
-        </p>
-      </div>
-    );
-  }
-
-  const attributes = graph.getNodeAttributes(nodeId) as {
-    color?: string;
-    content?: string;
-    label?: string;
-    nodeType?: string;
-    valid_from?: string | null;
-    valid_until?: string | null;
-    properties?: Record<string, unknown>;
-  };
-  const properties = attributes?.properties ?? {};
-  const attribution = sourceAttribution(properties);
-  const accentColor = attributes?.color || "#58a6ff";
-  const propertyEntries = Object.entries(properties).filter(
-    ([key]) =>
-      ![
-        "x",
-        "y",
-        "valid_from",
-        "valid_until",
-        "content",
-        "source",
-        "source_url",
-        "pmid",
-        "pmids",
-        "evidence",
-        "provenance",
-        "confidence",
-      ].includes(key),
-  );
-
-  return (
-    <aside style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ borderBottom: "1px solid rgba(88, 166, 255, 0.2)", paddingBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <span
-            style={{
-              background: accentColor,
-              boxShadow: `0 0 10px ${accentColor}`,
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-            }}
-          />
-          <span style={{ color: accentColor, fontSize: 12, fontWeight: 700 }}>{attributes?.nodeType || "Entity"}</span>
-        </div>
-        <h3 style={{ margin: 0, color: "#fff", fontSize: 20, fontWeight: 700, wordBreak: "break-word" }}>
-          {String(attributes?.label ?? nodeId)}
-        </h3>
-        <div style={{ color: "#8b949e", fontSize: 12, marginTop: 6 }}>{nodeId}</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-          {attributes?.valid_from || attributes?.valid_until ? (
-            <span style={subtleChipStyle}>temporal</span>
-          ) : null}
-          {attribution.length ? <span style={subtleChipStyle}>{attribution.length} source fields</span> : null}
-          {predictions.length ? <span style={subtleChipStyle}>{predictions.length} candidate links</span> : null}
-        </div>
-      </div>
-
-      {(attributes?.valid_from || attributes?.valid_until) && (
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "rgba(88, 166, 255, 0.08)",
-            border: "1px solid rgba(88, 166, 255, 0.2)",
-            borderRadius: 8,
-            fontSize: 12,
-            color: "#79c0ff",
-            fontFamily: "monospace",
-          }}
-        >
-          {attributes?.valid_from ? <div>from: {attributes.valid_from}</div> : null}
-          {attributes?.valid_until ? <div>until: {attributes.valid_until}</div> : null}
-        </div>
-      )}
-
-      <section style={sectionStyle}>
-        <div style={sectionTitleStyle}>Actions</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <button style={{ ...actionButtonStyle, width: "100%", justifyContent: "center" }} onClick={onRunPredictions}>
-            Run Link Prediction
-          </button>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button style={secondaryActionButtonStyle} onClick={() => onDownloadProvenance("json")}>
-              Provenance JSON
-            </button>
-            <button style={secondaryActionButtonStyle} onClick={() => onDownloadProvenance("markdown")}>
-              Provenance MD
-            </button>
-          </div>
-        </div>
-        <input
-          value={predictionType}
-          onChange={(event) => onPredictionTypeChange(event.target.value)}
-          placeholder="Optional candidate type filter, e.g. disease"
-          style={inputStyle}
-        />
-      </section>
-
-      <section style={sectionStyle}>
-        <div style={sectionTitleStyle}>Trace Path</div>
-        <input
-          value={pathTargetId}
-          onChange={(event) => onPathTargetChange(event.target.value)}
-          placeholder="Target node ID"
-          style={inputStyle}
-        />
-        <button style={actionButtonStyle} onClick={onTracePath}>Trace Causal Path</button>
-        {pathResult?.path?.length ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-            {pathResult.path.map((step, index) => (
-              <div key={`${step}-${index}`} style={pathStepStyle}>{index + 1}. {step}</div>
-            ))}
-            <div style={{ color: "#79c0ff", fontSize: 12, marginTop: 4 }}>
-              total weight: {pathResult.total_weight.toFixed(3)}
-            </div>
-          </div>
-        ) : (
-          <div style={emptyTextStyle}>Choose a target or click a candidate prediction to prepare a path trace.</div>
-        )}
-      </section>
-
-      <details className="node-panel-collapse" open={predictions.length > 0}>
-        <summary className="node-panel-summary">Candidate Links</summary>
-        <div className="node-panel-body">
-          {predictions.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {predictions.map((prediction) => (
-                <button
-                  key={`${prediction.target}-${prediction.type}`}
-                  style={predictionCardStyle}
-                  onClick={() => onPathTargetChange(prediction.target)}
-                >
-                  <div style={{ color: "#fff", fontWeight: 600 }}>{prediction.label || prediction.target}</div>
-                  <div style={{ color: "#8b949e", fontSize: 12 }}>{prediction.type}</div>
-                  <div style={{ color: "#58a6ff", fontSize: 12, marginTop: 4 }}>
-                    confidence {prediction.score.toFixed(3)}
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div style={emptyTextStyle}>Run link prediction to surface likely next-hop relationships.</div>
-          )}
-        </div>
-      </details>
-
-      <details className="node-panel-collapse">
-        <summary className="node-panel-summary">Source Attribution</summary>
-        <div className="node-panel-body">
-          {attribution.length ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {attribution.map(({ key, value }) => (
-                <div key={key} style={propertyCardStyle}>
-                  <div style={{ color: "rgba(88, 166, 255, 0.7)", fontSize: 11, marginBottom: 4 }}>{key}</div>
-                  <div style={{ color: "#e6edf3", fontSize: 13, wordBreak: "break-word" }}>
-                    {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={emptyTextStyle}>No explicit attribution metadata was found on this node.</div>
-          )}
-        </div>
-      </details>
-
-      <details className="node-panel-collapse">
-        <summary className="node-panel-summary">Properties</summary>
-        <div className="node-panel-body">
-          {propertyEntries.length ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {propertyEntries.map(([key, value]) => (
-                <div key={key} style={propertyCardStyle}>
-                  <div style={{ color: "rgba(88, 166, 255, 0.7)", fontSize: 11, marginBottom: 4 }}>{key}</div>
-                  <div style={{ color: "#e6edf3", fontSize: 13, wordBreak: "break-word" }}>
-                    {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={emptyTextStyle}>No additional properties are attached to this node.</div>
-          )}
-        </div>
-      </details>
-    </aside>
-  );
-}
-
 export function GraphWorkspace() {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
@@ -900,6 +659,7 @@ export function GraphWorkspace() {
   const [pluginRuntimeVersion, setPluginRuntimeVersion] = useState(0);
   const [effectsState, setEffectsState] = useState<GraphEffectsState>(DEFAULT_EFFECTS_STATE);
   const [graphDiagnosticsState, setGraphDiagnosticsState] = useState<GraphDiagnosticsSnapshot["effectAvailability"] | null>(null);
+  const [loadedPlugins, setLoadedPlugins] = useState<Record<string, GraphPlugin>>({});
 
   const debouncedTime = useDebounce(scrubberTime, 150);
   const prevActiveIdsRef = useRef<Set<string>>(new Set());
@@ -1164,18 +924,71 @@ export function GraphWorkspace() {
     [activeNodeCount, scrubberTime, temporalBounds?.max, temporalBounds?.min],
   );
 
-  const pluginRegistry = useMemo<GraphPluginRegistryEntry[]>(
+  const pluginRegistry = useMemo<LazyPluginRegistryEntry[]>(
     () => [
-      { plugin: explorationEffectsPlugin, enabled: true },
-      { plugin: neighborhoodPanelPlugin, enabled: true },
-      { plugin: temporalOverlayPlugin, enabled: true },
+      {
+        id: "exploration-effects",
+        panelId: "effects-panel",
+        label: "Effects",
+        title: "Open exploration effects controls",
+        order: 18,
+        load: loadExplorationEffectsPlugin,
+        shouldLoad: ({ panelState }) => Boolean(panelState["effects-panel"]),
+      },
+      {
+        id: "neighborhood-panel",
+        panelId: "neighborhood-panel",
+        label: "Neighbors",
+        title: "Toggle neighborhood panel",
+        order: 30,
+        load: loadNeighborhoodPanelPlugin,
+        shouldLoad: ({ panelState }) => Boolean(panelState["neighborhood-panel"]),
+      },
+      {
+        id: "temporal-overlay",
+        panelId: "temporal-panel",
+        label: "Temporal",
+        title: "Toggle temporal context panel",
+        order: 40,
+        load: loadTemporalOverlayPlugin,
+        shouldLoad: ({ panelState, temporalState }) => Boolean(panelState["temporal-panel"] || temporalState?.currentTime),
+      },
     ],
     [],
   );
   const activePlugins = useMemo(
-    () => pluginRegistry.filter((entry) => entry.enabled !== false).map((entry) => entry.plugin),
-    [pluginRegistry],
+    () => pluginRegistry.map((entry) => loadedPlugins[entry.id]).filter((plugin): plugin is GraphPlugin => Boolean(plugin)),
+    [loadedPlugins, pluginRegistry],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    pluginRegistry.forEach((entry) => {
+      if (loadedPlugins[entry.id]) {
+        return;
+      }
+
+      if (!entry.shouldLoad({ panelState: pluginPanelState, temporalState })) {
+        return;
+      }
+
+      void entry.load()
+        .then((plugin) => {
+          if (cancelled) {
+            return;
+          }
+          setLoadedPlugins((current) => (current[entry.id] ? current : { ...current, [entry.id]: plugin }));
+        })
+        .catch((error) => {
+          console.error(`[GraphPlugin:${entry.id}] lazy load failed`, error);
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedPlugins, pluginPanelState, pluginRegistry, temporalState]);
 
   const setEffectToggle = useCallback((effect: GraphEffectToggle, enabled: boolean | ((current: boolean) => boolean)) => {
     setEffectsState((current) => {
@@ -1344,9 +1157,16 @@ export function GraphWorkspace() {
     };
   }, [activePlugins, pluginContext, pluginRuntimeVersion]);
 
-  const pluginToolbarItems = useMemo(
-    () => collectPluginToolbarItems(activePlugins, pluginContext),
-    [activePlugins, pluginContext],
+  const pluginToolbarItems = useMemo<GraphPluginToolbarItem[]>(
+    () => pluginRegistry.map((entry) => ({
+      id: `${entry.id}-toggle`,
+      label: entry.label,
+      title: entry.title,
+      active: pluginContext.isPanelOpen(entry.panelId),
+      order: entry.order,
+      onClick: () => pluginContext.dispatchAction({ type: "togglePanel", panelId: entry.panelId }),
+    })),
+    [pluginContext, pluginRegistry],
   );
   const pluginPanels = useMemo(
     () => collectPluginPanels(activePlugins, pluginContext),
@@ -1356,7 +1176,21 @@ export function GraphWorkspace() {
     () => collectPluginOverlays(activePlugins, pluginContext),
     [activePlugins, pluginContext],
   );
-  const dockPanels = pluginPanels.filter((panel) => panel.placement === "bottom" || panel.placement === "side");
+  const pendingDockPanels = useMemo<GraphPluginPanelDescriptor[]>(
+    () => pluginRegistry
+      .filter((entry) => pluginPanelState[entry.panelId] && !loadedPlugins[entry.id])
+      .map((entry) => ({
+        id: entry.panelId,
+        title: entry.label,
+        placement: "bottom" as const,
+        order: entry.order,
+        content: <div style={pluginLoadingStyle}>Loading {entry.label.toLowerCase()}…</div>,
+      })),
+    [loadedPlugins, pluginPanelState, pluginRegistry],
+  );
+  const dockPanels = [...pluginPanels, ...pendingDockPanels]
+    .filter((panel) => panel.placement === "bottom" || panel.placement === "side")
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
   const openDockPanels = dockPanels.filter((panel) => pluginPanelState[panel.id]);
   const activeDockPanel =
     openDockPanels.find((panel) => panel.id === activeDockPanelId)
@@ -1614,11 +1448,13 @@ export function GraphWorkspace() {
               ) : null}
 
               <div className="explore-scene-footer">
-                <TimelinePanel
-                  onTimeChange={setScrubberTime}
-                  minDate={temporalBounds?.min ?? undefined}
-                  maxDate={temporalBounds?.max ?? undefined}
-                />
+                <Suspense fallback={<div style={timelineFallbackStyle}>Loading timeline…</div>}>
+                  <LazyTimelinePanel
+                    onTimeChange={setScrubberTime}
+                    minDate={temporalBounds?.min ?? undefined}
+                    maxDate={temporalBounds?.max ?? undefined}
+                  />
+                </Suspense>
               </div>
             </SurfaceCard>
           </div>
@@ -1627,18 +1463,20 @@ export function GraphWorkspace() {
             <div className="explore-inspector-shell">
               <InspectorPanel open={layoutState.showInspector} className="explore-inspector-card">
                 <div className="explore-inspector-scroll hud-scrollbar">
-                  <NodePanel
-                    nodeId={selectedNodeId}
-                    predictions={predictions}
-                    predictionType={predictionType}
-                    onPredictionTypeChange={setPredictionType}
-                    onRunPredictions={() => void handleRunPredictions()}
-                    pathTargetId={pathTargetId}
-                    onPathTargetChange={setPathTargetId}
-                    onTracePath={() => void handleTracePath()}
-                    pathResult={pathResult}
-                    onDownloadProvenance={(format) => void handleDownloadProvenance(format)}
-                  />
+                  <Suspense fallback={<div style={inspectorFallbackStyle}>Loading inspector…</div>}>
+                    <LazyGraphInspectorPanel
+                      nodeId={selectedNodeId}
+                      predictions={predictions}
+                      predictionType={predictionType}
+                      onPredictionTypeChange={setPredictionType}
+                      onRunPredictions={() => void handleRunPredictions()}
+                      pathTargetId={pathTargetId}
+                      onPathTargetChange={setPathTargetId}
+                      onTracePath={() => void handleTracePath()}
+                      pathResult={pathResult}
+                      onDownloadProvenance={(format) => void handleDownloadProvenance(format)}
+                    />
+                  </Suspense>
                 </div>
               </InspectorPanel>
             </div>
@@ -1692,59 +1530,17 @@ const predictionCardStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const pathStepStyle: React.CSSProperties = {
-  color: "#e6edf3",
-  fontSize: 13,
-  padding: "8px 10px",
-  background: "rgba(255, 255, 255, 0.03)",
-  borderRadius: 8,
-};
-
-const propertyCardStyle: React.CSSProperties = {
-  background: "rgba(0, 0, 0, 0.2)",
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid rgba(255, 255, 255, 0.05)",
-};
-
-const emptyTextStyle: React.CSSProperties = {
-  color: "#8b949e",
-  fontSize: 12,
-  lineHeight: 1.5,
-};
-
-const subtleChipStyle: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.04)",
-  color: "#9fb6d2",
-  padding: "4px 8px",
-  borderRadius: 999,
-  fontSize: 11,
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-};
-
-const sectionStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 10,
-  padding: 14,
-  background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
-  border: "1px solid rgba(255, 255, 255, 0.06)",
-  borderRadius: 14,
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  color: "#8b949e",
-  fontSize: 11,
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-};
-
 const pluginDockContentStyle: React.CSSProperties = {
   borderRadius: 16,
   border: "1px solid rgba(255, 255, 255, 0.06)",
   background: "rgba(255, 255, 255, 0.02)",
   padding: 14,
+};
+
+const pluginLoadingStyle: React.CSSProperties = {
+  color: "#8ea4be",
+  fontSize: 12,
+  padding: 10,
 };
 
 const searchResultsStripStyle: React.CSSProperties = {
@@ -1753,6 +1549,23 @@ const searchResultsStripStyle: React.CSSProperties = {
   gap: 10,
   maxHeight: 186,
   overflowY: "auto",
+};
+
+const inspectorFallbackStyle: React.CSSProperties = {
+  padding: 24,
+  color: "#8ea4be",
+  fontSize: 12,
+};
+
+const timelineFallbackStyle: React.CSSProperties = {
+  height: "90px",
+  display: "flex",
+  alignItems: "center",
+  padding: "0 18px",
+  color: "#8ea4be",
+  fontSize: 12,
+  borderTop: "1px solid rgba(88, 166, 255, 0.2)",
+  background: "rgba(1, 4, 9, 0.88)",
 };
 
 const loadingMetricStyle: React.CSSProperties = {

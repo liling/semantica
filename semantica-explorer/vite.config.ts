@@ -12,9 +12,41 @@ export default defineConfig({
  
   base: '/',
   build: {
-
     outDir: path.resolve(__dirname, '../semantica/static'),
-    emptyOutDir: true, 
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replaceAll('\\', '/')
+
+          if (!normalizedId.includes('node_modules')) {
+            return undefined
+          }
+
+          if (
+            normalizedId.includes('/node_modules/sigma/') ||
+            normalizedId.includes('/node_modules/graphology/') ||
+            normalizedId.includes('/node_modules/graphology-layout-forceatlas2/')
+          ) {
+            return 'graph-vendor'
+          }
+
+          if (
+            normalizedId.includes('/node_modules/vis-data/') ||
+            normalizedId.includes('/node_modules/vis-timeline/')
+          ) {
+            return 'timeline-vendor'
+          }
+
+          if (normalizedId.includes('/node_modules/@tanstack/react-query/')) {
+            return 'query-vendor'
+          }
+
+          return undefined
+        },
+      },
+    },
   },
   server: {
     proxy: {

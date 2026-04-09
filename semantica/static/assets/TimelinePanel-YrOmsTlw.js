@@ -1,0 +1,36 @@
+import{i as e}from"./rolldown-runtime-B1FJdls4.js";import{T as t,a as n}from"./query-vendor-Cbp9LWgA.js";import{r}from"./index-BVBOQ8an.js";import{n as ee,t as te}from"./timeline-vendor-DxuOyw5t.js";var ne=r(),i=e(t(),1),a=n(),o=new Date(`1970-01-01T00:00:00Z`),re=new Date(`2030-01-01T00:00:00Z`),s=`playhead`,ie=500,ae=6,oe=`
+  .sem-timeline-wrap .vis-timeline { border: none !important; background: transparent !important; overflow: visible !important; }
+  .sem-timeline-wrap .vis-panel.vis-background, .sem-timeline-wrap .vis-panel.vis-center { background: transparent !important; }
+  .sem-timeline-wrap .vis-panel { border-color: rgba(88, 166, 255, 0.15) !important; }
+  .sem-timeline-wrap .vis-time-axis .vis-text {
+    color: #8b949e !important;
+    font-size: 11px !important;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+    padding-top: 3px !important;
+  }
+  .sem-timeline-wrap .vis-time-axis .vis-text.vis-major {
+    color: #c9d1d9 !important;
+    font-weight: 700 !important;
+    font-size: 12px !important;
+  }
+  .sem-timeline-wrap .vis-time-axis .vis-grid.vis-minor { border-color: rgba(88, 166, 255, 0.07) !important; }
+  .sem-timeline-wrap .vis-time-axis .vis-grid.vis-major { border-color: rgba(88, 166, 255, 0.18) !important; }
+  .sem-timeline-wrap .vis-custom-time.${s} {
+    background: rgba(88, 166, 255, 0.15) !important;
+    width: 2px !important;
+    cursor: ew-resize !important;
+    z-index: 5 !important;
+  }
+  .sem-timeline-wrap .vis-custom-time.${s} > .vis-custom-time-marker {
+    background: #58a6ff !important;
+    color: #0d1117 !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    border-radius: 3px !important;
+    padding: 1px 5px !important;
+    white-space: nowrap !important;
+    box-shadow: 0 0 8px rgba(88, 166, 255, 0.7) !important;
+  }
+  .sem-timeline-wrap .vis-current-time { display: none !important; }
+  .sem-timeline-wrap .vis-panel.vis-left { display: none !important; }
+`;function c(e,t){if(!e)return t;let n=new Date(e);return Number.isNaN(n.getTime())?t:n}function l(e){return`${e.getFullYear()}/${String(e.getMonth()+1).padStart(2,`0`)}`}function se(e){let t=(0,ne.c)(56),{onTimeChange:n,minDate:r,maxDate:se}=e,u=(0,i.useRef)(null),d=(0,i.useRef)(null),f=(0,i.useRef)(o),p=(0,i.useRef)(null),[m,ce]=(0,i.useState)(!1),h;t[0]===Symbol.for(`react.memo_cache_sentinel`)?(h=l(o),t[0]=h):h=t[0];let[g,_]=(0,i.useState)(h),v;t[1]===r?v=t[2]:(v=c(r,o),t[1]=r,t[2]=v);let y=v,b=c(se,re),x;t[3]!==b||t[4]!==y?(x=new Date(Math.round((y.getTime()+b.getTime())/2)),t[3]=b,t[4]=y,t[5]=x):x=t[5];let S=x,C,w;t[6]!==S||t[7]!==b||t[8]!==y||t[9]!==n?(C=()=>{if(!u.current)return;let e=d.current;if(!e){let e=new ee([]),t={height:`100%`,min:y,max:b,start:y,end:b,showCurrentTime:!1,zoomable:!0,moveable:!0,zoomMin:31536e6,zoomMax:252288e7,showMajorLabels:!0,showMinorLabels:!0,timeAxis:{scale:`year`,step:5},format:{minorLabels:{year:`YYYY`},majorLabels:{year:`YYYY`}},orientation:{axis:`bottom`},margin:{item:0,axis:0},selectable:!1,stack:!1},r=new te(u.current,e,t);return d.current=r,f.current=S,r.addCustomTime(S,s),r.on(`timechange`,e=>{e.id===s&&(f.current=e.time,r.setCustomTime(e.time,s),n(e.time),_(l(e.time)))}),n(S),_(l(S)),()=>{r.destroy(),d.current=null}}e.setOptions({min:y,max:b,start:y,end:b}),f.current=S,e.setCustomTime(S,s),n(S),_(l(S))},w=[S,b,y,n],t[6]=S,t[7]=b,t[8]=y,t[9]=n,t[10]=C,t[11]=w):(C=t[10],w=t[11]),(0,i.useEffect)(C,w);let T;t[12]!==b||t[13]!==y||t[14]!==n?(T=()=>{p.current||=setInterval(()=>{let e=d.current;if(!e)return;let t=new Date(f.current);t.setMonth(t.getMonth()+ae),t>=b&&t.setTime(y.getTime()),f.current=t,e.setCustomTime(t,s),n(t),_(l(t))},ie)},t[12]=b,t[13]=y,t[14]=n,t[15]=T):T=t[15];let E=T,D;t[16]===Symbol.for(`react.memo_cache_sentinel`)?(D=()=>{p.current&&=(clearInterval(p.current),null)},t[16]=D):D=t[16];let O=D,k;t[17]===E?k=t[18]:(k=()=>{ce(e=>e?(O(),!1):(E(),!0))},t[17]=E,t[18]=k);let A=k,j,M;t[19]===Symbol.for(`react.memo_cache_sentinel`)?(M=()=>()=>O(),j=[O],t[19]=j,t[20]=M):(j=t[19],M=t[20]),(0,i.useEffect)(M,j);let N,P,F;t[21]===Symbol.for(`react.memo_cache_sentinel`)?(N={position:`relative`,width:`100%`,height:`90px`,borderTop:`1px solid rgba(88, 166, 255, 0.2)`,background:`rgba(1, 4, 9, 0.88)`,backdropFilter:`blur(16px)`,WebkitBackdropFilter:`blur(16px)`,display:`flex`,alignItems:`stretch`,flexShrink:0},P=(0,a.jsx)(`style`,{children:oe}),F={display:`flex`,flexDirection:`column`,alignItems:`center`,justifyContent:`center`,gap:4,padding:`0 16px`,borderRight:`1px solid rgba(88, 166, 255, 0.15)`,minWidth:80,flexShrink:0},t[21]=N,t[22]=P,t[23]=F):(N=t[21],P=t[22],F=t[23]);let I=m?`Pause Evolution`:`Play Evolution`,L=`1.5px solid ${m?`#58a6ff`:`rgba(88, 166, 255, 0.35)`}`,R=m?`rgba(88, 166, 255, 0.2)`:`rgba(88, 166, 255, 0.06)`,z=m?`0 0 10px rgba(88, 166, 255, 0.4)`:`none`,B;t[24]!==L||t[25]!==R||t[26]!==z?(B={width:34,height:34,borderRadius:`50%`,border:L,background:R,color:`#58a6ff`,cursor:`pointer`,display:`flex`,alignItems:`center`,justifyContent:`center`,transition:`all 0.2s`,boxShadow:z},t[24]=L,t[25]=R,t[26]=z,t[27]=B):B=t[27];let V;t[28]===m?V=t[29]:(V=m?(0,a.jsxs)(`svg`,{width:`14`,height:`14`,viewBox:`0 0 24 24`,fill:`currentColor`,children:[(0,a.jsx)(`rect`,{x:`6`,y:`4`,width:`4`,height:`16`}),(0,a.jsx)(`rect`,{x:`14`,y:`4`,width:`4`,height:`16`})]}):(0,a.jsx)(`svg`,{width:`14`,height:`14`,viewBox:`0 0 24 24`,fill:`currentColor`,children:(0,a.jsx)(`polygon`,{points:`5,3 19,12 5,21`})}),t[28]=m,t[29]=V);let H;t[30]!==I||t[31]!==B||t[32]!==V||t[33]!==A?(H=(0,a.jsx)(`button`,{id:`temporal-play-btn`,onClick:A,title:I,style:B,children:V}),t[30]=I,t[31]=B,t[32]=V,t[33]=A,t[34]=H):H=t[34];let U=m?`#58a6ff`:`#8b949e`,W;t[35]===U?W=t[36]:(W={fontSize:10,color:U,fontFamily:`monospace`,letterSpacing:`0.04em`,transition:`color 0.2s`},t[35]=U,t[36]=W);let G;t[37]!==g||t[38]!==W?(G=(0,a.jsx)(`span`,{style:W,children:g}),t[37]=g,t[38]=W,t[39]=G):G=t[39];let K;t[40]!==H||t[41]!==G?(K=(0,a.jsxs)(`div`,{style:F,children:[H,G]}),t[40]=H,t[41]=G,t[42]=K):K=t[42];let q;t[43]===Symbol.for(`react.memo_cache_sentinel`)?(q={position:`absolute`,top:5,left:100,fontSize:10,fontWeight:600,letterSpacing:`0.1em`,color:`rgba(88, 166, 255, 0.55)`,textTransform:`uppercase`,pointerEvents:`none`,zIndex:2},t[43]=q):q=t[43];let J;t[44]===y?J=t[45]:(J=y.getFullYear(),t[44]=y,t[45]=J);let Y;t[46]===b?Y=t[47]:(Y=b.getFullYear(),t[46]=b,t[47]=Y);let X;t[48]!==J||t[49]!==Y?(X=(0,a.jsxs)(`div`,{style:q,children:[`Temporal Scrubber · `,J,`-`,Y]}),t[48]=J,t[49]=Y,t[50]=X):X=t[50];let Z;t[51]===Symbol.for(`react.memo_cache_sentinel`)?(Z={flex:1,overflow:`hidden`,position:`relative`},t[51]=Z):Z=t[51];let Q;t[52]===Symbol.for(`react.memo_cache_sentinel`)?(Q=(0,a.jsx)(`div`,{className:`sem-timeline-wrap`,style:Z,children:(0,a.jsx)(`div`,{ref:u,style:{width:`100%`,height:`100%`,position:`relative`}})}),t[52]=Q):Q=t[52];let $;return t[53]!==K||t[54]!==X?($=(0,a.jsxs)(`div`,{style:N,children:[P,K,X,Q]}),t[53]=K,t[54]=X,t[55]=$):$=t[55],$}export{se as TimelinePanel};

@@ -1,5 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
+import { GraphLoadingOverlay } from "./GraphLoadingOverlay";
+import { getGraphLoadTitle } from "./graphLoading";
 import { useGraphData, useReloadGraphData } from "./useGraphData";
 import type {
   ApiNode,
@@ -117,21 +119,6 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-function phaseLabel(phase: GraphLoadProgress["phase"]) {
-  switch (phase) {
-    case "nodes":
-      return "Loading nodes";
-    case "edges":
-      return "Loading edges";
-    case "styling":
-      return "Computing layout and styling";
-    case "rendering":
-      return "Rendering graph";
-    default:
-      return "Loading graph";
-  }
-}
-
 function sourceAttribution(properties: Record<string, unknown>) {
   const keys = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"];
   return keys
@@ -151,86 +138,6 @@ function toSelectedNodeState(node: ApiNode, neighborCount: number, fallbackColor
     properties: node.properties ?? {},
     neighborCount,
   };
-}
-
-function LoadingOverlay({ progress }: { progress: GraphLoadProgress | null }) {
-  const safeProgress = progress ?? {
-    phase: "nodes" as const,
-    nodesLoaded: 0,
-    nodesTotal: null,
-    edgesLoaded: 0,
-    edgesTotal: null,
-    message: "Preparing graph load",
-    progress: 0.06,
-  };
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 9,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: "none",
-        background: "linear-gradient(180deg, rgba(1,4,9,0.12), rgba(1,4,9,0.46))",
-      }}
-    >
-      <div
-        style={{
-          width: "min(460px, calc(100% - 48px))",
-          borderRadius: 28,
-          padding: "22px 22px 18px",
-          background: "linear-gradient(135deg, rgba(7, 17, 31, 0.9), rgba(14, 28, 48, 0.78))",
-          border: "1px solid rgba(127, 208, 255, 0.16)",
-          boxShadow: "0 24px 80px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255,255,255,0.04)",
-          backdropFilter: "blur(18px)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 14 }}>
-          <div>
-            <div style={{ color: "#ffffff", fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Loading Graph</div>
-            <div style={{ color: "#8fa8c6", fontSize: 13 }}>{phaseLabel(safeProgress.phase)}</div>
-          </div>
-          <div style={{ display: "inline-flex", gap: 8, alignItems: "center" }} aria-hidden="true">
-            <span style={loadingDotStyle} />
-            <span style={{ ...loadingDotStyle, animationDelay: "0.14s" }} />
-            <span style={{ ...loadingDotStyle, animationDelay: "0.28s" }} />
-          </div>
-        </div>
-
-        <div style={{ color: "#c6d4e3", fontSize: 13, marginBottom: 12 }}>
-          {safeProgress.message}
-        </div>
-
-        <div style={{ width: "100%", height: 10, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(127,208,255,0.1)", marginBottom: 14 }}>
-          <span
-            style={{
-              display: "block",
-              height: "100%",
-              width: `${Math.round(Math.max(6, safeProgress.progress * 100))}%`,
-              borderRadius: 999,
-              background: "linear-gradient(90deg, rgba(74,163,255,0.9), rgba(127,208,255,0.95), rgba(242,182,109,0.92))",
-              boxShadow: "0 0 28px rgba(74,163,255,0.3)",
-              transition: "width 180ms ease",
-            }}
-          />
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <span style={loadingMetricStyle}>
-            {safeProgress.nodesLoaded.toLocaleString()}
-            {safeProgress.nodesTotal ? ` / ${safeProgress.nodesTotal.toLocaleString()}` : ""} nodes
-          </span>
-          <span style={loadingMetricStyle}>
-            {safeProgress.edgesLoaded.toLocaleString()}
-            {safeProgress.edgesTotal ? ` / ${safeProgress.edgesTotal.toLocaleString()}` : ""} edges
-          </span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function TimelineFallback({ min, max }: TemporalBounds) {
@@ -686,7 +593,11 @@ export function GraphWorkspaceShell() {
             onRuntimeReady={handleRuntimeReady}
           />
         </Suspense>
-        {showLoadingOverlay ? <LoadingOverlay progress={loadingProgress} /> : null}
+        <GraphLoadingOverlay
+          progress={loadingProgress}
+          visible={showLoadingOverlay}
+          showGraphBehind={Boolean(loadingProgress?.showGraphBehind || isGraphStageReady)}
+        />
       </div>
 
       <Suspense fallback={<TimelineFallback min={temporalBounds?.min ?? null} max={temporalBounds?.max ?? null} />}>
@@ -703,7 +614,7 @@ export function GraphWorkspaceShell() {
             <div className="graph-status-label">Graph Studio</div>
             <div className="graph-status-title">{visibleSelectedNode ? visibleSelectedNode.label : "Knowledge Explorer"}</div>
             <div className="graph-status-metrics">
-              {showLoadingOverlay && loadingProgress ? <span style={{ ...metricPillStyle, color: "#a9ddff" }}>{phaseLabel(loadingProgress.phase)}</span> : null}
+              {showLoadingOverlay && loadingProgress ? <span style={{ ...metricPillStyle, color: "#a9ddff" }}>{getGraphLoadTitle(loadingProgress.phase)}</span> : null}
               {layoutStatusLabel ? <span style={{ ...metricPillStyle, color: "#a9ddff" }}>{layoutStatusLabel}</span> : null}
               {snapshot ? <span style={metricPillStyle}>{snapshot.summary.nodeCount.toLocaleString()} nodes · {snapshot.summary.edgeCount.toLocaleString()} edges</span> : null}
               {activeNodeCount !== null ? <span style={{ ...metricPillStyle, color: "#4fd49c", borderColor: "rgba(79, 212, 156, 0.22)" }}>{activeNodeCount.toLocaleString()} active</span> : null}
@@ -889,24 +800,6 @@ const subtleChipStyle: CSSProperties = {
   borderRadius: 999,
   fontSize: 11,
   border: "1px solid rgba(255, 255, 255, 0.06)",
-};
-
-const loadingMetricStyle: CSSProperties = {
-  background: "rgba(255, 255, 255, 0.04)",
-  color: "#cfe3ff",
-  padding: "6px 10px",
-  borderRadius: 999,
-  fontSize: 12,
-  border: "1px solid rgba(127, 208, 255, 0.12)",
-};
-
-const loadingDotStyle: CSSProperties = {
-  width: 10,
-  height: 10,
-  borderRadius: 999,
-  background: "linear-gradient(135deg, rgba(127, 208, 255, 0.96), rgba(242, 182, 109, 0.96))",
-  boxShadow: "0 0 18px rgba(127, 208, 255, 0.35)",
-  animation: "sem-loader-pulse 1.2s ease-in-out infinite",
 };
 
 const collapseStyle: CSSProperties = {

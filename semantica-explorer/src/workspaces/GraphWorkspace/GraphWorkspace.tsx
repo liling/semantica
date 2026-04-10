@@ -2,12 +2,13 @@
 
 import { batchMergeEdges, batchMergeNodes, graph } from "../../store/graphStore";
 import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
+import { curveGroupForPair } from "../../store/edgePairKeys.js";
 import { InspectorPanel, MetricChip, SurfaceCard } from "../../ui/primitives";
 import { lazy, Suspense } from "react";
-import { GraphCanvas } from "./GraphCanvas";
-import type { GraphCanvasHandle, GraphViewMode } from "./GraphCanvas";
+import { SigmaSceneAdapter } from "./SigmaSceneAdapter";
 import { useLoadGraph, useReloadGraph } from "./useLoadGraph";
-import type { GraphLoadProgress } from "./useLoadGraph";
+import { GraphLoadingOverlay } from "./GraphLoadingOverlay";
+import { createGraphLoadProgress, getGraphLoadTitle } from "./graphLoading";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
 import {
   type GraphPlugin,
@@ -15,18 +16,22 @@ import {
   type GraphPluginContext,
   type GraphPluginOverlayDescriptor,
   type GraphPluginPanelDescriptor,
-  type GraphPluginRuntime,
   type GraphPluginToolbarItem,
-  type GraphTemporalState,
 } from "./plugins";
 import type { LinkPrediction, PathResponse } from "./GraphInspectorPanel";
+import type { GraphSceneHandle, GraphSceneRuntime } from "./scene";
 import type {
+  GraphAnalyticsSnapshot,
   GraphDiagnosticsSnapshot,
   GraphEffectToggle,
   GraphEffectsState,
   GraphInteractionState,
+  GraphLoadProgress,
   GraphLoadSummary,
+  GraphSelectedEdgeState,
   GraphSelectedNodeState,
+  GraphTemporalState,
+  GraphViewMode,
 } from "./types";
 
 type SearchResult = {
@@ -82,6 +87,12 @@ const DEFAULT_EFFECTS_STATE: GraphEffectsState = {
   pathPulseEnabled: false,
   pathFlowEnabled: false,
   lensEnabled: false,
+  temporalEmphasisEnabled: false,
+  semanticRegionsEnabled: true,
+  contoursEnabled: false,
+  pathfindingEnabled: false,
+  communitiesEnabled: false,
+  centralityEnabled: false,
   legendEnabled: false,
   diagnosticsEnabled: false,
   lensMode: "neighborhood",
@@ -90,7 +101,7 @@ const DEFAULT_EFFECTS_STATE: GraphEffectsState = {
 const LazyTimelinePanel = lazy(() => import("./TimelinePanel").then((module) => ({ default: module.TimelinePanel })));
 const LazyGraphInspectorPanel = lazy(() => import("./GraphInspectorPanel").then((module) => ({ default: module.GraphInspectorPanel })));
 
-const loadExplorationEffectsPlugin = () => import("./plugins/explorationEffectsPlugin").then((module) => module.explorationEffectsPlugin);
+const loadExplorationEffectsPlugin = () => import("./plugins/explorationEffectsPluginPhaseC").then((module) => module.explorationEffectsPluginPhaseC);
 const loadNeighborhoodPanelPlugin = () => import("./plugins/neighborhoodPanelPlugin").then((module) => module.neighborhoodPanelPlugin);
 const loadTemporalOverlayPlugin = () => import("./plugins/temporalOverlayPlugin").then((module) => module.temporalOverlayPlugin);
 
@@ -391,83 +402,6 @@ const HUD_CSS = `
   }
 `;
 
-function phaseLabel(phase: GraphLoadProgress["phase"]) {
-  switch (phase) {
-    case "nodes":
-      return "Loading nodes";
-    case "edges":
-      return "Loading edges";
-    case "styling":
-      return "Computing layout and styling";
-    case "rendering":
-      return "Rendering graph";
-    default:
-      return "Loading graph";
-  }
-}
-
-function LoadingOverlay({
-  progress,
-  showGraphBehind,
-}: {
-  progress: GraphLoadProgress | null;
-  showGraphBehind: boolean;
-}) {
-  const safeProgress = progress ?? {
-    phase: "nodes" as const,
-    nodesLoaded: 0,
-    nodesTotal: null,
-    edgesLoaded: 0,
-    edgesTotal: null,
-    message: "Preparing graph load",
-    progress: 0.06,
-  };
-
-  return (
-    <div
-      className="graph-loading-overlay"
-      style={{
-        background: showGraphBehind
-          ? "linear-gradient(180deg, rgba(1,4,9,0.08), rgba(1,4,9,0.28))"
-          : "linear-gradient(180deg, rgba(1,4,9,0.32), rgba(1,4,9,0.58))",
-      }}
-    >
-      <div className="graph-loading-card">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 14 }}>
-          <div>
-            <div style={{ color: "#ffffff", fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Loading Graph</div>
-            <div style={{ color: "#8fa8c6", fontSize: 13 }}>{phaseLabel(safeProgress.phase)}</div>
-          </div>
-          <div className="graph-loading-dots" aria-hidden="true">
-            <span className="graph-loading-dot" />
-            <span className="graph-loading-dot" />
-            <span className="graph-loading-dot" />
-          </div>
-        </div>
-
-        <div style={{ color: "#c6d4e3", fontSize: 13, marginBottom: 12 }}>
-          {safeProgress.message}
-        </div>
-
-        <div className="graph-loading-bar" style={{ marginBottom: 14 }}>
-          <span style={{ width: `${Math.round(Math.max(6, safeProgress.progress * 100))}%` }} />
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <span style={loadingMetricStyle}>
-            {safeProgress.nodesLoaded.toLocaleString()}
-            {safeProgress.nodesTotal ? ` / ${safeProgress.nodesTotal.toLocaleString()}` : ""} nodes
-          </span>
-          <span style={loadingMetricStyle}>
-            {safeProgress.edgesLoaded.toLocaleString()}
-            {safeProgress.edgesTotal ? ` / ${safeProgress.edgesTotal.toLocaleString()}` : ""} edges
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function getProvenanceCount(properties: Record<string, unknown>) {
   return PROVENANCE_KEYS.reduce(
     (count, key) => (properties[key] !== undefined && properties[key] !== null ? count + 1 : count),
@@ -518,6 +452,8 @@ function buildRealtimeNodeAttributes(payload: {
 }
 
 function buildRealtimeEdgeAttributes(payload: {
+  id: string;
+  familyId?: string;
   source_id: string;
   target_id: string;
   type?: string;
@@ -530,6 +466,10 @@ function buildRealtimeEdgeAttributes(payload: {
   const baseColor = isInferred ? GRAPH_THEME.palette.accent.path : GRAPH_THEME.palette.muted.edgeStructure;
 
   return {
+    edgeId: payload.id,
+    familyId: payload.familyId || payload.id,
+    sourceId: payload.source_id,
+    targetId: payload.target_id,
     weight: Number(payload.weight ?? 1),
     edgeType: payload.type || "related_to",
     properties,
@@ -541,7 +481,7 @@ function buildRealtimeEdgeAttributes(payload: {
     visualPriority: isInferred ? 0.95 : 0.5,
     isBidirectional,
     edgeFamily: isInferred ? "path" : isBidirectional ? "bidirectional" : "line",
-    curveGroup: isBidirectional ? [payload.source_id, payload.target_id].sort().join("::") : null,
+    curveGroup: isBidirectional ? curveGroupForPair(payload.source_id, payload.target_id) : null,
     type: "line",
     edgeVariant: isInferred ? "pathSignal" : isBidirectional ? "bidirectionalCurve" : "directional",
     arrowVisibilityPolicy: isInferred ? "always" : "contextual",
@@ -549,6 +489,7 @@ function buildRealtimeEdgeAttributes(payload: {
     isParallelPair: false,
     parallelIndex: 0,
     parallelCount: 1,
+    familySize: 1,
   };
 }
 
@@ -577,6 +518,51 @@ function buildSelectedNodeState(nodeId: string): GraphSelectedNodeState | null {
     valid_until: attributes.valid_until ?? null,
     properties: attributes.properties ?? {},
     neighborCount: graph.neighbors(nodeId).length,
+  };
+}
+
+function buildSelectedEdgeState(edgeId: string): GraphSelectedEdgeState | null {
+  if (!edgeId || !graph.hasEdge(edgeId)) {
+    return null;
+  }
+
+  const [sourceId, targetId] = graph.extremities(edgeId);
+  const attributes = graph.getEdgeAttributes(edgeId) as {
+    edgeType?: string;
+    weight?: number;
+    properties?: Record<string, unknown>;
+    familyId?: string;
+  };
+  const sourceAttributes = graph.getNodeAttributes(sourceId) as { label?: string; content?: string };
+  const targetAttributes = graph.getNodeAttributes(targetId) as { label?: string; content?: string };
+  const properties = attributes.properties ?? {};
+  const familyId = String(attributes.familyId || edgeId);
+  let familySize = 0;
+  let siblingCount = 0;
+  graph.forEachEdge((candidateEdgeId, candidateAttrs) => {
+    const edgeAttrs = candidateAttrs as { familyId?: string };
+    const [candidateSource, candidateTarget] = graph.extremities(candidateEdgeId);
+    if (String(edgeAttrs.familyId || candidateEdgeId) === familyId) {
+      familySize += 1;
+    }
+    if (candidateSource === sourceId && candidateTarget === targetId) {
+      siblingCount += 1;
+    }
+  });
+
+  return {
+    id: edgeId,
+    familyId,
+    sourceId,
+    sourceLabel: String(sourceAttributes.label ?? sourceAttributes.content ?? sourceId),
+    targetId,
+    targetLabel: String(targetAttributes.label ?? targetAttributes.content ?? targetId),
+    edgeType: String(attributes.edgeType ?? "related_to"),
+    weight: Number(attributes.weight ?? 1),
+    properties,
+    provenanceCount: getProvenanceCount(properties),
+    familySize,
+    siblingCount,
   };
 }
 
@@ -637,6 +623,7 @@ function collectPluginOverlays(
 
 export function GraphWorkspace() {
   const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [selectedEdgeId, setSelectedEdgeId] = useState("");
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [viewMode, setViewMode] = useState<GraphViewMode>("focused");
   const [searchQuery, setSearchQuery] = useState("");
@@ -659,17 +646,21 @@ export function GraphWorkspace() {
   const [pluginRuntimeVersion, setPluginRuntimeVersion] = useState(0);
   const [effectsState, setEffectsState] = useState<GraphEffectsState>(DEFAULT_EFFECTS_STATE);
   const [graphDiagnosticsState, setGraphDiagnosticsState] = useState<GraphDiagnosticsSnapshot["effectAvailability"] | null>(null);
+  const [graphAnalyticsState, setGraphAnalyticsState] = useState<GraphAnalyticsSnapshot | null>(null);
   const [loadedPlugins, setLoadedPlugins] = useState<Record<string, GraphPlugin>>({});
 
   const debouncedTime = useDebounce(scrubberTime, 150);
   const prevActiveIdsRef = useRef<Set<string>>(new Set());
-  const canvasRef = useRef<GraphCanvasHandle>(null);
-  const pluginRuntimeRef = useRef<GraphPluginRuntime | null>(null);
+  const sceneRef = useRef<GraphSceneHandle>(null);
+  const pluginRuntimeRef = useRef<GraphSceneRuntime | null>(null);
+  const settlingOverlayTimeoutRef = useRef<number | null>(null);
   const pluginInteractionStateRef = useRef<GraphInteractionState>({
     hoveredNodeId: null,
     selectedNodeId: "",
+    selectedEdgeId: "",
     focusedNodeId: "",
     activePath: [],
+    activePathEdgeIds: [],
     viewMode: "focused",
     zoomTier: "overview",
     isLayoutRunning: false,
@@ -678,12 +669,45 @@ export function GraphWorkspace() {
 
   const { data: summary, isLoading, isFetching } = useLoadGraph({
     enabled: true,
-    onGraphReady: () => {
-      setIsLayoutRunning(true);
-      setLoadingProgress(null);
+    onGraphReady: (graphSummary) => {
+      setIsLayoutRunning(!graphSummary.layoutReady);
+      if (settlingOverlayTimeoutRef.current !== null) {
+        window.clearTimeout(settlingOverlayTimeoutRef.current);
+        settlingOverlayTimeoutRef.current = null;
+      }
+
+      if (graphSummary.layoutReady) {
+        setLoadingProgress(null);
+        return;
+      }
+
+      setLoadingProgress(createGraphLoadProgress({
+        phase: "stabilizing_layout",
+        progressKind: "indeterminate",
+        nodesLoaded: graphSummary.nodeCount,
+        nodesTotal: graphSummary.nodeCount,
+        edgesLoaded: graphSummary.edgeCount,
+        edgesTotal: graphSummary.edgeCount,
+        message: "Settling runtime layout",
+        showGraphBehind: true,
+        layoutSource: graphSummary.layoutSource,
+        layoutState: "bootstrapping",
+      }));
+      settlingOverlayTimeoutRef.current = window.setTimeout(() => {
+        setLoadingProgress((current) => (current?.phase === "stabilizing_layout" ? null : current));
+        settlingOverlayTimeoutRef.current = null;
+      }, 900);
     },
     onProgress: setLoadingProgress,
   });
+
+  useEffect(() => {
+    return () => {
+      if (settlingOverlayTimeoutRef.current !== null) {
+        window.clearTimeout(settlingOverlayTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -736,7 +760,7 @@ export function GraphWorkspace() {
           });
           prevActiveIdsRef.current = nextActiveIds;
           setActiveNodeCount(data.active_node_count);
-          canvasRef.current?.getSigma()?.refresh();
+          sceneRef.current?.getRuntime()?.requestRender();
         });
       } catch (fetchError) {
         if (!cancelled) {
@@ -753,12 +777,17 @@ export function GraphWorkspace() {
 
   const focusNode = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
+    setSelectedEdgeId("");
     setPathResult(null);
     setSearchResults([]);
     setSearchError("");
     if (nodeId) {
       setIsLayoutRunning(false);
     }
+  }, []);
+
+  const handleEdgeSelect = useCallback((edgeId: string) => {
+    setSelectedEdgeId(edgeId);
   }, []);
 
   const handleSearch = useCallback(async () => {
@@ -821,7 +850,7 @@ export function GraphWorkspace() {
       if (data.path?.length) {
         const lastStep = data.path[data.path.length - 1];
         if (graph.hasNode(lastStep)) {
-          canvasRef.current?.focusNode(lastStep);
+          sceneRef.current?.focusNode(lastStep);
         }
       }
     } catch (pathError) {
@@ -870,17 +899,19 @@ export function GraphWorkspace() {
               attributes: buildRealtimeNodeAttributes(payload),
             },
           ]);
-          canvasRef.current?.getSigma()?.refresh();
+          sceneRef.current?.getRuntime()?.requestRender();
         }
         if (eventType === "ADD_EDGE") {
           batchMergeEdges([
             {
+              id: String(payload.id),
+              familyId: payload.familyId ? String(payload.familyId) : String(payload.id),
               source: payload.source_id,
               target: payload.target_id,
               attributes: buildRealtimeEdgeAttributes(payload),
             },
           ]);
-          canvasRef.current?.getSigma()?.refresh();
+          sceneRef.current?.getRuntime()?.requestRender();
         }
       } catch (socketError) {
         console.error("[GraphWorkspace] websocket update failed", socketError);
@@ -906,13 +937,18 @@ export function GraphWorkspace() {
     return `${localNeighborCount} direct neighbors highlighted`;
   }, [selectedNodeId, viewMode]);
 
-  const showLoadingOverlay = isLoading || isFetching;
+  const showLoadingOverlay = isLoading || isFetching || loadingProgress?.phase === "stabilizing_layout";
   const hasGraphContent = Boolean(summary?.nodeCount);
   const activePath = pathResult?.path ?? [];
+  const activePathEdgeIds = pathResult?.edge_ids ?? [];
   const graphSummary = summary as GraphLoadSummary | null;
   const selectedNodeState = useMemo(
     () => buildSelectedNodeState(selectedNodeId),
     [selectedNodeId, summary?.nodeCount, summary?.edgeCount],
+  );
+  const selectedEdgeState = useMemo(
+    () => buildSelectedEdgeState(selectedEdgeId),
+    [selectedEdgeId, summary?.nodeCount, summary?.edgeCount],
   );
   const temporalState = useMemo(
     () => ({
@@ -1009,10 +1045,10 @@ export function GraphWorkspace() {
   const handlePluginAction = useCallback((action: GraphPluginActionRequest) => {
     switch (action.type) {
       case "fitView":
-        canvasRef.current?.fitView();
+        sceneRef.current?.fitView();
         return;
       case "focusNode":
-        canvasRef.current?.focusNode(action.nodeId);
+        sceneRef.current?.focusNode(action.nodeId);
         return;
       case "selectNode":
         focusNode(action.nodeId);
@@ -1075,8 +1111,8 @@ export function GraphWorkspace() {
   }, [activePlugins, effectsState, graphDiagnosticsState, pluginPanelState]);
 
   const pluginContext = useMemo<GraphPluginContext>(() => ({
-    get sigma() {
-      return pluginRuntimeRef.current?.sigma ?? null;
+    get scene() {
+      return pluginRuntimeRef.current;
     },
     get graph() {
       return graph;
@@ -1095,9 +1131,11 @@ export function GraphWorkspace() {
     getTemporalState: () => temporalState,
     getEffectsState: () => effectsState,
     getDiagnosticsSnapshot: () => diagnosticsSnapshot,
+    getAnalyticsSnapshot: () => graphAnalyticsState,
     isPanelOpen: (panelId: string) => Boolean(pluginPanelState[panelId]),
     dispatchAction: handlePluginAction,
   }), [
+    graphAnalyticsState,
     diagnosticsSnapshot,
     effectsState,
     graphSummary,
@@ -1108,8 +1146,11 @@ export function GraphWorkspace() {
     temporalState,
   ]);
 
-  const handlePluginRuntimeChange = useCallback((runtime: GraphPluginRuntime | null) => {
+  const handleSceneRuntimeChange = useCallback((runtime: GraphSceneRuntime | null) => {
     pluginRuntimeRef.current = runtime;
+    if (!runtime) {
+      setGraphAnalyticsState(null);
+    }
     setPluginRuntimeVersion((version) => version + 1);
   }, []);
 
@@ -1129,6 +1170,10 @@ export function GraphWorkspace() {
       return;
     }
     setGraphDiagnosticsState(effectAvailability);
+  }, []);
+
+  const handleAnalyticsChange = useCallback((analytics: GraphAnalyticsSnapshot | null) => {
+    setGraphAnalyticsState(analytics);
   }, []);
 
   useEffect(() => {
@@ -1252,7 +1297,7 @@ export function GraphWorkspace() {
           id: "fit-view",
           label: "Fit View",
           title: "Reset the camera to the current view",
-          onClick: () => canvasRef.current?.fitView(),
+          onClick: () => sceneRef.current?.fitView(),
         },
         {
           id: "layout-toggle",
@@ -1288,6 +1333,25 @@ export function GraphWorkspace() {
     return groups;
   }, [isLayoutRunning, pluginToolbarItems, reload, searchQuery, selectedNodeId, showLoadingOverlay, viewMode]);
 
+  const sceneAdapterProps = {
+    onNodeSelect: focusNode,
+    onEdgeSelect: handleEdgeSelect,
+    selectedNodeId,
+    selectedEdgeId,
+    activePath,
+    activePathEdgeIds,
+    effectsState,
+    temporalState,
+    isLayoutRunning,
+    viewMode,
+    showFitViewButton: false,
+    pluginOverlays: pluginOverlays.map((overlay) => overlay.element),
+    onRuntimeChange: handleSceneRuntimeChange,
+    onInteractionStateChange: handleInteractionStateChange,
+    onDiagnosticsChange: handleDiagnosticsChange,
+    onAnalyticsChange: handleAnalyticsChange,
+  } as const;
+
   return (
     <div className="palantir-bg" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
       <style>{HUD_CSS}</style>
@@ -1301,7 +1365,7 @@ export function GraphWorkspace() {
               <div className="explore-toolbar">
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {showLoadingOverlay && loadingProgress ? (
-                    <MetricChip>{phaseLabel(loadingProgress.phase)}</MetricChip>
+                    <MetricChip>{getGraphLoadTitle(loadingProgress.phase)}</MetricChip>
                   ) : null}
                   {summary ? (
                     <MetricChip>{summary.nodeCount.toLocaleString()} nodes · {summary.edgeCount.toLocaleString()} edges</MetricChip>
@@ -1377,6 +1441,61 @@ export function GraphWorkspace() {
                   ))}
                 </div>
               ) : null}
+
+              {selectedEdgeState ? (
+                <div style={selectedEdgeCardStyle}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: "rgba(127, 208, 255, 0.76)", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                        Relationship
+                      </div>
+                      <div style={{ color: "#f4f8ff", fontSize: 15, fontWeight: 700, marginTop: 6 }}>
+                        {selectedEdgeState.edgeType}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedEdgeId("")}
+                      style={{ ...secondaryActionButtonStyle, minHeight: 30, padding: "6px 10px" }}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <button style={selectedEdgeNodeChipStyle} onClick={() => focusNode(selectedEdgeState.sourceId)}>
+                      {selectedEdgeState.sourceLabel}
+                    </button>
+                    <span style={{ color: "#7fa7ce", fontSize: 12 }}>→</span>
+                    <button style={selectedEdgeNodeChipStyle} onClick={() => focusNode(selectedEdgeState.targetId)}>
+                      {selectedEdgeState.targetLabel}
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <MetricChip tone="warm">weight {selectedEdgeState.weight.toFixed(2)}</MetricChip>
+                    <MetricChip>{selectedEdgeState.siblingCount} parallel lane{selectedEdgeState.siblingCount === 1 ? "" : "s"}</MetricChip>
+                    <MetricChip>{selectedEdgeState.familySize} family member{selectedEdgeState.familySize === 1 ? "" : "s"}</MetricChip>
+                    {selectedEdgeState.provenanceCount > 0 ? (
+                      <MetricChip>{selectedEdgeState.provenanceCount} provenance fields</MetricChip>
+                    ) : null}
+                  </div>
+
+                  {Object.keys(selectedEdgeState.properties).length ? (
+                    <div style={selectedEdgePropertyGridStyle}>
+                      {Object.entries(selectedEdgeState.properties).slice(0, 4).map(([key, value]) => (
+                        <div key={key} style={selectedEdgePropertyCardStyle}>
+                          <div style={{ color: "rgba(127, 208, 255, 0.68)", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                            {key}
+                          </div>
+                          <div style={{ color: "#dce7f4", fontSize: 12, marginTop: 4, wordBreak: "break-word" }}>
+                            {typeof value === "object" ? JSON.stringify(value) : String(value)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </SurfaceCard>
         </section>
@@ -1393,23 +1512,15 @@ export function GraphWorkspace() {
                 <div className="palantir-grid" />
                 <div className="palantir-vignette" />
                 <div className="explore-scene-stage">
-                  <GraphCanvas
-                    ref={canvasRef}
-                    onNodeClick={focusNode}
-                    selectedNodeId={selectedNodeId}
-                    activePath={activePath}
-                    effectsState={effectsState}
-                    isLayoutRunning={isLayoutRunning}
-                    viewMode={viewMode}
-                    showFitViewButton={false}
-                    pluginOverlays={pluginOverlays.map((overlay) => overlay.element)}
-                    onPluginRuntimeChange={handlePluginRuntimeChange}
-                    onInteractionStateChange={handleInteractionStateChange}
-                    onDiagnosticsChange={handleDiagnosticsChange}
+                  <SigmaSceneAdapter
+                    ref={sceneRef}
+                    {...sceneAdapterProps}
                   />
-                  {showLoadingOverlay ? (
-                    <LoadingOverlay progress={loadingProgress} showGraphBehind={hasGraphContent} />
-                  ) : null}
+                  <GraphLoadingOverlay
+                    progress={loadingProgress}
+                    visible={showLoadingOverlay}
+                    showGraphBehind={hasGraphContent || Boolean(loadingProgress?.showGraphBehind)}
+                  />
                 </div>
               </div>
 
@@ -1530,6 +1641,37 @@ const predictionCardStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+const selectedEdgeCardStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  padding: 14,
+  background: "linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(88, 166, 255, 0.04))",
+  border: "1px solid rgba(127, 208, 255, 0.16)",
+  borderRadius: 14,
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+};
+
+const selectedEdgeNodeChipStyle: React.CSSProperties = {
+  ...secondaryActionButtonStyle,
+  minHeight: 32,
+  padding: "7px 12px",
+  whiteSpace: "nowrap",
+};
+
+const selectedEdgePropertyGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 8,
+};
+
+const selectedEdgePropertyCardStyle: React.CSSProperties = {
+  borderRadius: 10,
+  padding: 10,
+  background: "rgba(255, 255, 255, 0.03)",
+  border: "1px solid rgba(255, 255, 255, 0.06)",
+};
+
 const pluginDockContentStyle: React.CSSProperties = {
   borderRadius: 16,
   border: "1px solid rgba(255, 255, 255, 0.06)",
@@ -1566,13 +1708,4 @@ const timelineFallbackStyle: React.CSSProperties = {
   fontSize: 12,
   borderTop: "1px solid rgba(88, 166, 255, 0.2)",
   background: "rgba(1, 4, 9, 0.88)",
-};
-
-const loadingMetricStyle: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.04)",
-  color: "#cfe3ff",
-  padding: "6px 10px",
-  borderRadius: 999,
-  fontSize: 12,
-  border: "1px solid rgba(127, 208, 255, 0.12)",
 };

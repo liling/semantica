@@ -12,6 +12,7 @@ export type LinkPrediction = {
 
 export type PathResponse = {
   path: string[];
+  edge_ids?: string[];
   total_weight: number;
 };
 

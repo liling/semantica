@@ -1,18 +1,22 @@
 import type { ReactNode } from "react";
 import type Graph from "graphology";
-import type Sigma from "sigma";
 
 import { graph, type EdgeAttributes, type NodeAttributes } from "../../../store/graphStore";
 import type { GraphTheme } from "../graphTheme";
+import type { GraphSceneRuntime } from "../scene";
 import type {
+  GraphAnalyticsSnapshot,
   GraphDiagnosticsSnapshot,
   GraphEffectsState,
   GraphEffectToggle,
   GraphInteractionState,
   GraphLoadSummary,
   GraphSelectedNodeState,
+  GraphTemporalState,
   GraphViewMode,
 } from "../types";
+
+export type { GraphTemporalState } from "../types";
 
 export type GraphPluginId = string;
 export type GraphPluginPanelPlacement = "side" | "bottom";
@@ -20,13 +24,6 @@ export type GraphPluginPanelPlacement = "side" | "bottom";
 export interface GraphInspectorState {
   selectedNodeId: string | null;
   ownsSelectionDetails: boolean;
-}
-
-export interface GraphTemporalState {
-  currentTime: Date | null;
-  activeNodeCount: number | null;
-  minDate?: string;
-  maxDate?: string;
 }
 
 export type GraphPluginActionRequest =
@@ -67,14 +64,8 @@ export interface GraphPluginOverlayDescriptor {
   element: ReactNode;
 }
 
-export interface GraphPluginRuntime {
-  sigma: Sigma;
-  graph: typeof graph | Graph<NodeAttributes, EdgeAttributes>;
-  displayGraph: typeof graph | Graph<NodeAttributes, EdgeAttributes>;
-}
-
 export interface GraphPluginContext {
-  readonly sigma: Sigma | null;
+  readonly scene: GraphSceneRuntime | null;
   readonly graph: typeof graph | Graph<NodeAttributes, EdgeAttributes>;
   readonly displayGraph: typeof graph | Graph<NodeAttributes, EdgeAttributes>;
   readonly theme: GraphTheme;
@@ -85,6 +76,7 @@ export interface GraphPluginContext {
   getTemporalState: () => GraphTemporalState | null;
   getEffectsState: () => GraphEffectsState;
   getDiagnosticsSnapshot: () => GraphDiagnosticsSnapshot | null;
+  getAnalyticsSnapshot: () => GraphAnalyticsSnapshot | null;
   isPanelOpen: (panelId: string) => boolean;
   dispatchAction: (action: GraphPluginActionRequest) => void;
 }

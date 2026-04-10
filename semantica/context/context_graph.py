@@ -108,6 +108,7 @@ Production Use Cases:
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 import threading
 import itertools
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -186,6 +187,62 @@ def _pick_first(*values: Any) -> Any:
             continue
         return value
     return None
+
+
+def _default_edge_id(
+    source_id: str,
+    target_id: str,
+    edge_type: str,
+    weight: float,
+    metadata: Dict[str, Any],
+    valid_from: Optional[str],
+    valid_until: Optional[str],
+) -> str:
+    payload = json.dumps(
+        {
+            "source": source_id,
+            "target": target_id,
+            "type": edge_type,
+            "weight": weight,
+            "valid_from": valid_from,
+            "valid_until": valid_until,
+            "metadata": metadata,
+        },
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def _resolve_edge_identity(
+    *,
+    source_id: str,
+    target_id: str,
+    edge_type: str,
+    weight: float,
+    metadata: Dict[str, Any],
+    valid_from: Optional[str],
+    valid_until: Optional[str],
+    edge_id: Any = None,
+    family_id: Any = None,
+) -> Tuple[str, str]:
+    resolved_edge_id = str(
+        _pick_first(
+            edge_id,
+            _default_edge_id(
+                source_id=source_id,
+                target_id=target_id,
+                edge_type=edge_type,
+                weight=weight,
+                metadata=metadata,
+                valid_from=valid_from,
+                valid_until=valid_until,
+            ),
+        )
+    )
+    resolved_family_id = str(_pick_first(family_id, resolved_edge_id))
+    return resolved_edge_id, resolved_family_id
 
 
 def _coerce_metadata_map(*values: Any) -> Dict[str, Any]:
@@ -282,10 +339,31 @@ class ContextEdge:
     source_id: str
     target_id: str
     edge_type: str
+    edge_id: str = ""
     weight: float = 1.0
+    family_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     valid_from: Optional[str] = None  
     valid_until: Optional[str] = None  
+
+    def __post_init__(self) -> None:
+        self.source_id = str(self.source_id)
+        self.target_id = str(self.target_id)
+        self.edge_type = str(self.edge_type or "related_to")
+        self.weight = _coerce_float(self.weight, default=1.0)
+        if not isinstance(self.metadata, dict):
+            self.metadata = {}
+        self.edge_id, self.family_id = _resolve_edge_identity(
+            source_id=self.source_id,
+            target_id=self.target_id,
+            edge_type=self.edge_type,
+            weight=self.weight,
+            metadata=self.metadata,
+            valid_from=self.valid_from,
+            valid_until=self.valid_until,
+            edge_id=self.edge_id,
+            family_id=self.family_id,
+        )
     def is_active(self, at_time: Optional[datetime] = None) -> bool:
         """Return True if this edge is active at the given time (defaults to now).
 
@@ -308,6 +386,8 @@ class ContextEdge:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format."""
         d = {
+            "id": self.edge_id,
+            "familyId": self.family_id or self.edge_id,
             "source_id": self.source_id,
             "target_id": self.target_id,
             "type": self.edge_type,
@@ -529,10 +609,35 @@ class ContextGraph:
                 valid_from = _pick_first(raw_edge.get("valid_from"), edge_props.get("valid_from"))
                 valid_until = _pick_first(raw_edge.get("valid_until"), edge_props.get("valid_until"))
                 weight = _coerce_float(_pick_first(raw_edge.get("weight"), edge_props.get("weight")), default=1.0)
-                internal_edge = ContextEdge(
+                explicit_edge_id = _pick_first(
+                    raw_edge.get("id"),
+                    raw_edge.get("edge_id"),
+                    edge_props.pop("id", None),
+                    edge_props.pop("edge_id", None),
+                )
+                explicit_family_id = _pick_first(
+                    raw_edge.get("familyId"),
+                    raw_edge.get("family_id"),
+                    edge_props.pop("familyId", None),
+                    edge_props.pop("family_id", None),
+                )
+                edge_id, family_id = _resolve_edge_identity(
                     source_id=source_id,
                     target_id=target_id,
                     edge_type=str(edge_type or "related_to"),
+                    weight=weight,
+                    metadata=edge_props,
+                    valid_from=valid_from,
+                    valid_until=valid_until,
+                    edge_id=explicit_edge_id,
+                    family_id=explicit_family_id,
+                )
+                internal_edge = ContextEdge(
+                    edge_id=edge_id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    edge_type=str(edge_type or "related_to"),
+                    family_id=str(family_id) if family_id is not None else edge_id,
                     weight=weight,
                     metadata=edge_props,
                     valid_from=valid_from,
@@ -619,6 +724,8 @@ class ContextGraph:
             for edge in self._adjacency.get(source_id, []):
                 if edge.target_id == target_id:
                     data = edge.metadata.copy()
+                    data["id"] = edge.edge_id
+                    data["familyId"] = edge.family_id or edge.edge_id
                     data["type"] = edge.edge_type
                     data["weight"] = edge.weight
                     return data
@@ -785,12 +892,27 @@ class ContextGraph:
         """
         valid_from = properties.pop("valid_from", None)
         valid_until = properties.pop("valid_until", None)
+        explicit_edge_id = properties.pop("id", properties.pop("edge_id", None))
+        explicit_family_id = properties.pop("familyId", properties.pop("family_id", None))
+        edge_id, family_id = _resolve_edge_identity(
+            source_id=source_id,
+            target_id=target_id,
+            edge_type=edge_type,
+            weight=weight,
+            metadata=properties,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            edge_id=explicit_edge_id,
+            family_id=explicit_family_id,
+        )
         with self._lock:
             return self._add_internal_edge(
                 ContextEdge(
+                    edge_id=edge_id,
                     source_id=source_id,
                     target_id=target_id,
                     edge_type=edge_type,
+                    family_id=str(family_id) if family_id is not None else edge_id,
                     weight=weight,
                     metadata=properties,
                     valid_from=valid_from,
@@ -1118,11 +1240,15 @@ class ContextGraph:
             
             gen = (
                 {
+                    "id": e.edge_id,
+                    "familyId": e.family_id or e.edge_id,
                     "source": e.source_id,
                     "target": e.target_id,
                     "type": e.edge_type,
                     "weight": e.weight,
                     "metadata": e.metadata,
+                    "valid_from": e.valid_from,
+                    "valid_until": e.valid_until,
                 }
                 for e in source
             )
@@ -1243,14 +1369,11 @@ class ContextGraph:
         if getattr(self, "mutation_callback", None) and not getattr(
             self, "_suspend_mutation_callback", False
         ):
-            import json
-
-            edge_id = json.dumps([edge.source_id, edge.edge_type, edge.target_id])
             try:
-                self.mutation_callback("ADD_EDGE", edge_id, edge.to_dict())
+                self.mutation_callback("ADD_EDGE", edge.edge_id, edge.to_dict())
             except Exception as e:
                 self.logger.warning(
-                    f"Audit trail callback failed for edge {edge_id}: {e}"
+                    f"Audit trail callback failed for edge {edge.edge_id}: {e}"
                 )
         return True
 
@@ -1508,11 +1631,15 @@ class ContextGraph:
         edges_out = []
         for e in self.edges:
             entry = {
+                "id": e.edge_id,
+                "familyId": e.family_id or e.edge_id,
                 "source": e.source_id,
                 "target": e.target_id,
                 "type": e.edge_type,
                 "weight": e.weight,
             }
+            if e.metadata:
+                entry["metadata"] = e.metadata
             if e.valid_from is not None:
                 entry["valid_from"] = e.valid_from
             if e.valid_until is not None:
@@ -1549,12 +1676,27 @@ class ContextGraph:
 
         # Add edges — restore validity windows if present
         for edge_data in graph_dict.get("edges", []):
-            edge = ContextEdge(
+            edge_metadata = edge_data.get("metadata", edge_data.get("properties", {})) or {}
+            edge_weight = edge_data.get("weight", 1.0)
+            edge_id, family_id = _resolve_edge_identity(
                 source_id=edge_data["source"],
                 target_id=edge_data["target"],
                 edge_type=edge_data["type"],
-                weight=edge_data.get("weight", 1.0),
-                metadata=edge_data.get("metadata", {}),
+                weight=edge_weight,
+                metadata=edge_metadata,
+                valid_from=edge_data.get("valid_from"),
+                valid_until=edge_data.get("valid_until"),
+                edge_id=edge_data.get("id", edge_data.get("edge_id")),
+                family_id=edge_data.get("familyId", edge_data.get("family_id")),
+            )
+            edge = ContextEdge(
+                edge_id=edge_id,
+                source_id=edge_data["source"],
+                target_id=edge_data["target"],
+                edge_type=edge_data["type"],
+                weight=edge_weight,
+                family_id=family_id,
+                metadata=edge_metadata,
                 valid_from=edge_data.get("valid_from"),
                 valid_until=edge_data.get("valid_until"),
             )

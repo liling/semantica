@@ -79,13 +79,18 @@ async def import_file(
             target = raw_edge.get("target") or raw_edge.get("target_id") or raw_edge.get("end") or raw_edge.get("end_id") or raw_edge.get("END_ID")
             if not source or not target:
                 continue
+            edge_properties = raw_edge.get("metadata", raw_edge.get("properties", {})) or {}
             edges.append(
                 {
+                    "id": raw_edge.get("id", raw_edge.get("edge_id")),
+                    "familyId": raw_edge.get("familyId", raw_edge.get("family_id")),
                     "source_id": str(source),
                     "target_id": str(target),
                     "type": raw_edge.get("type", raw_edge.get("relationship", "related_to")),
                     "weight": float(raw_edge.get("weight", 1.0)),
-                    "properties": raw_edge.get("metadata", raw_edge.get("properties", {})) or {},
+                    "properties": edge_properties,
+                    "valid_from": raw_edge.get("valid_from", edge_properties.get("valid_from")),
+                    "valid_until": raw_edge.get("valid_until", edge_properties.get("valid_until")),
                 }
             )
 
@@ -111,10 +116,29 @@ async def import_file(
                 edge_props = {
                     key: value
                     for key, value in row.items()
-                    if key not in {"source", "source_id", "target", "target_id", "type", "relationship", "weight", ":START_ID", "START_ID", ":END_ID", "END_ID", ":TYPE"}
+                    if key not in {
+                        "id",
+                        "edge_id",
+                        "familyId",
+                        "family_id",
+                        "source",
+                        "source_id",
+                        "target",
+                        "target_id",
+                        "type",
+                        "relationship",
+                        "weight",
+                        ":START_ID",
+                        "START_ID",
+                        ":END_ID",
+                        "END_ID",
+                        ":TYPE",
+                    }
                 }
                 edges.append(
                     {
+                        "id": row.get("id") or row.get("edge_id"),
+                        "familyId": row.get("familyId") or row.get("family_id"),
                         "source_id": str(source),
                         "target_id": str(target),
                         "type": row.get("type") or row.get("relationship") or row.get(":TYPE") or "related_to",
@@ -165,11 +189,20 @@ async def export_graph(
         output = io.StringIO()
         writer = csv.writer(output)
 
-        writer.writerow(["kind", "id", "type", "content", "source", "target", "weight"])
+        writer.writerow(["kind", "id", "familyId", "type", "content", "source", "target", "weight"])
         for node in graph_dict.get("entities", []):
-            writer.writerow(["node", node.get("id"), node.get("type"), node.get("text"), "", "", ""])
+            writer.writerow(["node", node.get("id"), "", node.get("type"), node.get("text"), "", "", ""])
         for edge in graph_dict.get("relationships", []):
-            writer.writerow(["edge", "", edge.get("type"), "", edge.get("source"), edge.get("target"), edge.get("metadata", {}).get("weight", "")])
+            writer.writerow([
+                "edge",
+                edge.get("id"),
+                edge.get("familyId"),
+                edge.get("type"),
+                "",
+                edge.get("source"),
+                edge.get("target"),
+                edge.get("metadata", {}).get("weight", edge.get("weight", "")),
+            ])
 
         content = output.getvalue()
         media_type = "text/csv"

@@ -22,6 +22,8 @@ class NodeResponse(BaseModel):
 
 
 class EdgeResponse(BaseModel):
+    id: str
+    familyId: str
     source: str
     target: str
     type: str
@@ -63,6 +65,7 @@ class PathResponse(BaseModel):
     target: str
     algorithm: str
     path: List[str]
+    edge_ids: List[str] = Field(default_factory=list)
     total_weight: float = 0.0
 
 

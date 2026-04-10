@@ -1,6 +1,7 @@
 ﻿import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { batchMergeEdges, batchMergeNodes, clearGraph } from "../../store/graphStore";
 import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
+import { curveGroupForPair, pairRegistryKey } from "../../store/edgePairKeys.js";
 import {
   GRAPH_THEME,
   clamp,
@@ -12,6 +13,8 @@ import {
   type GraphLabelVisibilityPolicy,
   type GraphNodeShapeVariant,
 } from "./graphTheme";
+import { createGraphLoadProgress } from "./graphLoading";
+import type { GraphLoadProgress, GraphLoadSummary } from "./types";
 
 const SEMANTIC_COLOR_FIELDS = [
   "community",
@@ -110,6 +113,82 @@ function structuralColorKey(nodeId: string, attributes: NodeAttributes): string 
   return `${attributes.nodeType || "entity"}:${shard}`;
 }
 
+function readFiniteCoordinate(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function seededUnit(value: string): number {
+  return (hashString(value) % 10000) / 10000;
+}
+
+function buildClusterSeedPositions(
+  nodes: Array<{
+    id: string;
+    semanticGroup: string;
+    priority: number;
+  }>,
+): Map<string, { x: number; y: number }> {
+  const grouped = new Map<string, Array<{ id: string; priority: number }>>();
+  nodes.forEach((node) => {
+    const entry = grouped.get(node.semanticGroup);
+    if (entry) {
+      entry.push({ id: node.id, priority: node.priority });
+    } else {
+      grouped.set(node.semanticGroup, [{ id: node.id, priority: node.priority }]);
+    }
+  });
+
+  const groupEntries = [...grouped.entries()]
+    .sort((left, right) => {
+      const countDelta = right[1].length - left[1].length;
+      if (countDelta !== 0) {
+        return countDelta;
+      }
+      return left[0].localeCompare(right[0]);
+    });
+
+  const groupCenters = new Map<string, { x: number; y: number; spread: number }>();
+  groupEntries.forEach(([group, members], index) => {
+    const angle = index * 2.399963229728653;
+    const radius = 170 + Math.sqrt(index + 1) * 195;
+    const spread = 72 + Math.sqrt(members.length) * 16;
+    groupCenters.set(group, {
+      x: Math.cos(angle) * radius * 1.14,
+      y: Math.sin(angle) * radius * 0.84,
+      spread,
+    });
+  });
+
+  const seeded = new Map<string, { x: number; y: number }>();
+  groupEntries.forEach(([group, members]) => {
+    const center = groupCenters.get(group);
+    if (!center) {
+      return;
+    }
+
+    members
+      .sort((left, right) => {
+        if (right.priority !== left.priority) {
+          return right.priority - left.priority;
+        }
+        return left.id.localeCompare(right.id);
+      })
+      .forEach((member, index) => {
+        const angle = index * 2.399963229728653 + seededUnit(`${group}:${member.id}:angle`) * 0.72;
+        const radial = Math.sqrt((index + 0.5) / Math.max(members.length, 1)) * center.spread;
+        const jitterX = (seededUnit(`${member.id}:jx`) - 0.5) * center.spread * 0.22;
+        const jitterY = (seededUnit(`${member.id}:jy`) - 0.5) * center.spread * 0.18;
+        seeded.set(member.id, {
+          x: center.x + Math.cos(angle) * radial + jitterX,
+          y: center.y + Math.sin(angle) * radial * 0.86 + jitterY,
+        });
+      });
+  });
+
+  return seeded;
+}
+
 function getProvenanceCount(properties: Record<string, unknown>): number {
   return PROVENANCE_KEYS.reduce(
     (count, key) => (properties[key] !== undefined && properties[key] !== null ? count + 1 : count),
@@ -201,6 +280,8 @@ interface ApiNode {
 }
 
 interface ApiEdge {
+  id: string;
+  familyId: string;
   source: string;
   target: string;
   type: string;
@@ -222,22 +303,6 @@ interface EdgeListResponse {
   skip: number;
   limit: number;
   next_cursor?: string | null;
-}
-
-export interface GraphLoadSummary {
-  nodeCount: number;
-  edgeCount: number;
-  loadTimeMs: number;
-}
-
-export interface GraphLoadProgress {
-  phase: "nodes" | "edges" | "styling" | "rendering";
-  nodesLoaded: number;
-  nodesTotal: number | null;
-  edgesLoaded: number;
-  edgesTotal: number | null;
-  message: string;
-  progress: number;
 }
 
 const PAGE_LIMIT = 1000;
@@ -269,8 +334,11 @@ async function fetchAllNodes(
 
     total = data.total ?? total;
     collected.push(...data.nodes);
-    onProgress?.({
-      phase: "nodes",
+    onProgress?.(createGraphLoadProgress({
+      phase: "fetching_nodes",
+      progressKind: total ? "determinate" : "indeterminate",
+      loaded: collected.length,
+      total,
       nodesLoaded: collected.length,
       nodesTotal: total,
       edgesLoaded: 0,
@@ -278,8 +346,7 @@ async function fetchAllNodes(
       message: total
         ? `Loading nodes ${collected.length.toLocaleString()} of ${total.toLocaleString()}`
         : `Loading nodes ${collected.length.toLocaleString()}`,
-      progress: total ? Math.min(collected.length / Math.max(total, 1), 0.45) : 0.18,
-    });
+    }));
 
     if (!data.next_cursor) {
       break;
@@ -299,7 +366,9 @@ async function fetchAllEdges(
 ): Promise<ApiEdge[]> {
   let cursor: string | null = null;
   const collected: ApiEdge[] = [];
+  const seenEdgeIds = new Set<string>();
   let total: number | null = null;
+  let warnedOverTotal = false;
 
   while (true) {
     const url = new URL("/api/graph/edges", window.location.origin);
@@ -319,19 +388,38 @@ async function fetchAllEdges(
     }
 
     total = data.total ?? total;
-    const validEdges = data.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+    const validEdges = data.edges.filter((edge) => {
+      if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+        return false;
+      }
+      if (seenEdgeIds.has(edge.id)) {
+        return false;
+      }
+      seenEdgeIds.add(edge.id);
+      return true;
+    });
     collected.push(...validEdges);
-    onProgress?.({
-      phase: "edges",
+    const safeLoaded = total ? Math.min(seenEdgeIds.size, total) : seenEdgeIds.size;
+    if (!warnedOverTotal && total !== null && seenEdgeIds.size > total) {
+      warnedOverTotal = true;
+      console.warn("[graph-load] edge pagination returned more unique edge ids than total", {
+        uniqueEdgesLoaded: seenEdgeIds.size,
+        total,
+      });
+    }
+    onProgress?.(createGraphLoadProgress({
+      phase: "fetching_edges",
+      progressKind: total ? "determinate" : "indeterminate",
+      loaded: safeLoaded,
+      total,
       nodesLoaded: nodeProgress.loaded,
       nodesTotal: nodeProgress.total,
-      edgesLoaded: collected.length,
+      edgesLoaded: safeLoaded,
       edgesTotal: total,
       message: total
-        ? `Loading edges ${collected.length.toLocaleString()} of ${total.toLocaleString()}`
-        : `Loading edges ${collected.length.toLocaleString()}`,
-      progress: total ? 0.45 + Math.min(collected.length / Math.max(total, 1), 1) * 0.35 : 0.62,
-    });
+        ? `Loading edges ${safeLoaded.toLocaleString()} of ${total.toLocaleString()}`
+        : `Loading edges ${safeLoaded.toLocaleString()}`,
+    }));
 
     if (!data.next_cursor) {
       break;
@@ -363,17 +451,18 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
     queryKey: ["graph", "full-load"],
     enabled,
     staleTime: Infinity,
+    retry: 0,
     queryFn: async ({ signal }): Promise<GraphLoadSummary> => {
       const startedAt = performance.now();
-      onProgress?.({
-        phase: "nodes",
+      onProgress?.(createGraphLoadProgress({
+        phase: "bootstrapping",
+        progressKind: "indeterminate",
         nodesLoaded: 0,
         nodesTotal: null,
         edgesLoaded: 0,
         edgesTotal: null,
-        message: "Preparing graph load",
-        progress: 0.06,
-      });
+        message: "Preparing graph session",
+      }));
 
       const fetchedNodes = await fetchAllNodes(signal, onProgress);
       const nodeIds = new Set(fetchedNodes.map((node) => node.id));
@@ -394,33 +483,29 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
       }
 
       const maxDegree = Math.max(...degreeByNode.values(), 1);
-      const draftAttributes = fetchedNodes.map((node) => {
-        const x = Number((node.properties as Record<string, unknown>)?.x ?? Math.random() * 1000 - 500);
-        const y = Number((node.properties as Record<string, unknown>)?.y ?? Math.random() * 1000 - 500);
-        return {
-          id: node.id,
-          attributes: {
-            label: node.content || node.id,
-            x,
-            y,
-            nodeType: node.type,
-            content: node.content,
-            valid_from: node.valid_from,
-            valid_until: node.valid_until,
-            properties: node.properties,
-          } as NodeAttributes,
-        };
-      });
+      const draftAttributes = fetchedNodes.map((node) => ({
+        id: node.id,
+        attributes: {
+          label: node.content || node.id,
+          x: 0,
+          y: 0,
+          nodeType: node.type,
+          content: node.content,
+          valid_from: node.valid_from,
+          valid_until: node.valid_until,
+          properties: node.properties,
+        } as NodeAttributes,
+      }));
 
-      onProgress?.({
-        phase: "styling",
+      onProgress?.(createGraphLoadProgress({
+        phase: "computing_styling",
+        progressKind: "indeterminate",
         nodesLoaded: fetchedNodes.length,
         nodesTotal: fetchedNodes.length,
         edgesLoaded: fetchedEdges.length,
         edgesTotal: fetchedEdges.length,
-        message: "Computing graph styling",
-        progress: 0.86,
-      });
+        message: "Applying semantic color, sizing, and structural styling",
+      }));
 
       const colorAccessor = chooseColorAccessor(draftAttributes);
       const nodePriorityById = new Map<string, number>();
@@ -431,95 +516,173 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
         nodePriorityById.set(nodeId, sizeRatio);
       }
 
+      const semanticKeyByNodeId = new Map<string, string>();
+      draftAttributes.forEach(({ id, attributes }) => {
+        semanticKeyByNodeId.set(id, colorAccessor(id, attributes));
+      });
+
+      const providedCoordinateCount = fetchedNodes.reduce((count, node) => {
+        const properties = node.properties as Record<string, unknown>;
+        return readFiniteCoordinate(properties?.x) !== null && readFiniteCoordinate(properties?.y) !== null
+          ? count + 1
+          : count;
+      }, 0);
+      const coordinateCoverage = fetchedNodes.length > 0 ? providedCoordinateCount / fetchedNodes.length : 0;
+      const useProvidedCoordinates = coordinateCoverage >= 0.92;
+      const seededPositions = useProvidedCoordinates
+        ? null
+        : buildClusterSeedPositions(
+            draftAttributes.map(({ id, attributes }) => ({
+              id,
+              semanticGroup: semanticKeyByNodeId.get(id) ?? structuralColorKey(id, attributes),
+              priority: nodePriorityById.get(id) ?? 0,
+            })),
+          );
+
       const nodesToMerge = draftAttributes.map(({ id, attributes }) => {
-        const semanticGroup = colorAccessor(id, attributes);
+        const semanticGroup = semanticKeyByNodeId.get(id) ?? colorAccessor(id, attributes);
         const colorIndex = hashString(semanticGroup) % GRAPH_THEME.palette.semantic.length;
         const baseColor = GRAPH_THEME.palette.semantic[colorIndex];
         const sizeRatio = nodePriorityById.get(id) ?? 0;
-        const dynamicSize = clamp(2.6, 2.6 + 12.4 * sizeRatio, 15.8);
+        const dynamicSize = clamp(1.8, 1.8 + 8.8 * sizeRatio, 11.8);
         const hasTemporalBounds = Boolean(attributes.valid_from || attributes.valid_until);
         const provenanceCount = getProvenanceCount(attributes.properties ?? {});
+        const properties = attributes.properties as Record<string, unknown>;
+        const providedX = readFiniteCoordinate(properties?.x);
+        const providedY = readFiniteCoordinate(properties?.y);
+        const seededPosition = seededPositions?.get(id);
+        const x = useProvidedCoordinates
+          ? providedX ?? 0
+          : providedX ?? seededPosition?.x ?? 0;
+        const y = useProvidedCoordinates
+          ? providedY ?? 0
+          : providedY ?? seededPosition?.y ?? 0;
         return {
           id,
           attributes: {
             ...attributes,
+            x,
+            y,
             semanticGroup,
             color: baseColor,
             baseColor,
             mutedColor: withAlpha(baseColor, GRAPH_THEME.nodes.mutedAlpha),
-            glowColor: withAlpha(baseColor, 0.34),
+            glowColor: withAlpha(baseColor, 0.24),
             size: dynamicSize,
             baseSize: dynamicSize,
             visualPriority: sizeRatio,
             labelPriority: sizeRatio,
             strokeColor: darkenHex(baseColor, 112),
             borderColor: darkenHex(baseColor, 112),
-            borderSize: 0.85,
+            borderSize: 0.72,
             ...resolveNodeVariantMetadata(baseColor, sizeRatio, hasTemporalBounds, provenanceCount),
           } as NodeAttributes,
         };
       });
 
-      const edgeKeys = new Set(fetchedEdges.map((edge) => `${edge.source}::${edge.target}`));
+      const edgeKeys = new Set(fetchedEdges.map((edge) => pairRegistryKey(edge.source, edge.target)));
+      const parallelCounts = new Map<string, number>();
+      const familyCounts = new Map<string, number>();
+      fetchedEdges.forEach((edge) => {
+        const pairKey = pairRegistryKey(edge.source, edge.target);
+        parallelCounts.set(pairKey, (parallelCounts.get(pairKey) ?? 0) + 1);
+        familyCounts.set(edge.familyId, (familyCounts.get(edge.familyId) ?? 0) + 1);
+      });
+      const parallelOffsets = new Map<string, number>();
 
       const edgesToMerge = fetchedEdges.map((edge) => {
         const sourcePriority = nodePriorityById.get(edge.source) ?? 0;
         const targetPriority = nodePriorityById.get(edge.target) ?? 0;
-        const isBidirectional = edgeKeys.has(`${edge.target}::${edge.source}`);
+        const isBidirectional = edgeKeys.has(pairRegistryKey(edge.target, edge.source));
+        const pairKey = pairRegistryKey(edge.source, edge.target);
+        const parallelIndex = parallelOffsets.get(pairKey) ?? 0;
+        parallelOffsets.set(pairKey, parallelIndex + 1);
+        const parallelCount = parallelCounts.get(pairKey) ?? 1;
 
         return {
+          id: edge.id,
+          familyId: edge.familyId,
           source: edge.source,
           target: edge.target,
           attributes: {
+            edgeId: edge.id,
+            familyId: edge.familyId,
+            sourceId: edge.source,
+            targetId: edge.target,
             weight: edge.weight,
             edgeType: edge.type,
             properties: edge.properties,
-            size: clamp(0.45, 0.5 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.38, 1.8),
-            baseSize: clamp(0.45, 0.5 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.38, 1.8),
+            size: clamp(0.18, 0.22 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.2, 0.88),
+            baseSize: clamp(0.18, 0.22 + Math.sqrt(Math.max(Number(edge.weight) || 1, 1)) * 0.2, 0.88),
             color: GRAPH_THEME.palette.muted.edgeStructure,
             baseColor: GRAPH_THEME.palette.muted.edgeStructure,
             mutedColor: GRAPH_THEME.palette.muted.edgeOverview,
             visualPriority: Math.max(sourcePriority, targetPriority),
             isBidirectional,
             edgeFamily: isBidirectional ? "bidirectional" : "line",
-            curveGroup: isBidirectional
-              ? [edge.source, edge.target].sort().join("::")
-              : null,
+            curveGroup: curveGroupForPair(edge.source, edge.target),
             type: "line",
+            isParallelPair: parallelCount > 1,
+            parallelIndex,
+            parallelCount,
+            familySize: familyCounts.get(edge.familyId) ?? 1,
             ...resolveEdgeVariantMetadata(edge, sourcePriority, targetPriority, isBidirectional),
           } as EdgeAttributes,
         };
       });
 
-      onProgress?.({
-        phase: "rendering",
+      onProgress?.(createGraphLoadProgress({
+        phase: "hydrating_scene",
+        progressKind: "indeterminate",
         nodesLoaded: nodesToMerge.length,
         nodesTotal: nodesToMerge.length,
         edgesLoaded: edgesToMerge.length,
         edgesTotal: edgesToMerge.length,
-        message: "Rendering graph",
-        progress: 0.96,
-      });
+        message: "Preparing renderer and hydrating graph scene",
+      }));
 
-      clearGraph();
-      batchMergeNodes(nodesToMerge);
-      batchMergeEdges(edgesToMerge);
+      try {
+        clearGraph();
+      } catch (error) {
+        console.error("[graph-load] clearGraph failed", error);
+        throw error;
+      }
+
+      try {
+        batchMergeNodes(nodesToMerge);
+      } catch (error) {
+        console.error("[graph-load] batchMergeNodes failed", error);
+        throw error;
+      }
+
+      try {
+        batchMergeEdges(edgesToMerge);
+      } catch (error) {
+        console.error("[graph-load] batchMergeEdges failed", error);
+        throw error;
+      }
 
       const summary = {
         nodeCount: nodesToMerge.length,
         edgeCount: edgesToMerge.length,
         loadTimeMs: Math.round(performance.now() - startedAt),
+        hasCoordinates: useProvidedCoordinates,
+        layoutSource: useProvidedCoordinates ? "provided" : "runtime",
+        layoutReady: useProvidedCoordinates,
       } satisfies GraphLoadSummary;
 
-      onProgress?.({
-        phase: "rendering",
+      onProgress?.(createGraphLoadProgress({
+        phase: summary.layoutReady ? "ready" : "stabilizing_layout",
+        progressKind: "indeterminate",
         nodesLoaded: summary.nodeCount,
         nodesTotal: summary.nodeCount,
         edgesLoaded: summary.edgeCount,
         edgesTotal: summary.edgeCount,
-        message: "Graph ready",
-        progress: 1,
-      });
+        message: summary.layoutReady ? "Graph ready" : "Settling runtime layout",
+        showGraphBehind: !summary.layoutReady,
+        layoutSource: summary.layoutSource,
+        layoutState: summary.layoutReady ? "interactive" : "bootstrapping",
+      }));
 
       onGraphReady?.(summary);
       return summary;

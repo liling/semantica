@@ -5,6 +5,14 @@ import type { GraphPlugin } from "./types";
 const NEIGHBORHOOD_PANEL_ID = "neighborhood-panel";
 const MAX_NEIGHBORS = 10;
 
+function maxWeightBetween(graphRef: any, sourceId: string, targetId: string): number {
+  let weight = 0;
+  graphRef.forEachDirectedEdge(sourceId, targetId, (_edgeId: string, attrs: { weight?: number }) => {
+    weight = Math.max(weight, Number(attrs.weight ?? 0));
+  });
+  return weight;
+}
+
 function formatNeighborMeta(neighbor: { nodeType: string; degree: number; weight: number }) {
   const parts = [neighbor.nodeType, `degree ${neighbor.degree}`];
   if (neighbor.weight > 0) {
@@ -51,15 +59,10 @@ export const neighborhoodPanelPlugin: GraphPlugin = {
       .neighbors(selected.id)
       .map((neighborId) => {
         const attrs = context.graph.getNodeAttributes(neighborId);
-        let weight = 0;
-        if (context.graph.hasDirectedEdge(selected.id, neighborId)) {
-          const edge = context.graph.getDirectedEdgeAttributes(selected.id, neighborId) as { weight?: number };
-          weight = Math.max(weight, Number(edge.weight ?? 0));
-        }
-        if (context.graph.hasDirectedEdge(neighborId, selected.id)) {
-          const edge = context.graph.getDirectedEdgeAttributes(neighborId, selected.id) as { weight?: number };
-          weight = Math.max(weight, Number(edge.weight ?? 0));
-        }
+        const weight = Math.max(
+          maxWeightBetween(context.graph, selected.id, neighborId),
+          maxWeightBetween(context.graph, neighborId, selected.id),
+        );
         return {
           id: neighborId,
           label: String(attrs.label || neighborId),

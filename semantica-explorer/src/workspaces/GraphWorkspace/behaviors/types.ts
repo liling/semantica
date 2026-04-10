@@ -15,6 +15,7 @@ export interface GraphBehaviorContext {
   getInteractionState: () => GraphInteractionState;
   setHoveredNodeId: (nodeId: string | null) => void;
   onNodeSelectionChange: (nodeId: string) => void;
+  onEdgeSelectionChange: (edgeId: string) => void;
   focusNodeInView: (nodeId: string) => void;
   fitCurrentView: () => void;
   dispatchAction: (action: GraphBehaviorActionRequest) => void;
@@ -27,6 +28,7 @@ export interface GraphBehavior {
   onNodeEnter?: (context: GraphBehaviorContext, nodeId: string) => void;
   onNodeLeave?: (context: GraphBehaviorContext, nodeId: string) => void;
   onNodeClick?: (context: GraphBehaviorContext, nodeId: string) => void;
+  onEdgeClick?: (context: GraphBehaviorContext, edgeId: string) => void;
   onStageClick?: (context: GraphBehaviorContext) => void;
   onCameraChange?: (context: GraphBehaviorContext, cameraState: GraphCameraState) => void;
   onStateChange?: (context: GraphBehaviorContext, interactionState: GraphInteractionState) => void;

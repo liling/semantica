@@ -6,10 +6,16 @@ export const clickSelectionBehavior: GraphBehavior = {
   detach: () => {},
   onNodeClick: (context, nodeId) => {
     context.setHoveredNodeId(nodeId);
+    context.onEdgeSelectionChange("");
     context.onNodeSelectionChange(nodeId);
+  },
+  onEdgeClick: (context, edgeId) => {
+    context.setHoveredNodeId(null);
+    context.onEdgeSelectionChange(edgeId);
   },
   onStageClick: (context) => {
     context.setHoveredNodeId(null);
+    context.onEdgeSelectionChange("");
     context.onNodeSelectionChange("");
   },
 };

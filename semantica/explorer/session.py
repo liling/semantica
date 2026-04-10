@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, UTC
 from typing import Any, Dict, Iterable, List, Optional
 
-from ..context.context_graph import ContextGraph
+from ..context.context_graph import ContextGraph, _resolve_edge_identity
 
 _KG_AVAILABLE = False
 try:
@@ -220,7 +220,31 @@ class GraphSession:
         if valid_until is not None:
             properties["valid_until"] = valid_until
 
+        edge_id, family_id = _resolve_edge_identity(
+            source_id=str(edge.get("source", edge.get("source_id", ""))),
+            target_id=str(edge.get("target", edge.get("target_id", ""))),
+            edge_type=str(edge.get("type", "related_to")),
+            weight=weight,
+            metadata=properties,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            edge_id=(
+                edge.get("id")
+                or edge.get("edge_id")
+                or meta.get("id")
+                or meta.get("edge_id")
+            ),
+            family_id=(
+                edge.get("familyId")
+                or edge.get("family_id")
+                or meta.get("familyId")
+                or meta.get("family_id")
+            ),
+        )
+
         return {
+            "id": edge_id,
+            "familyId": family_id,
             "source": str(edge.get("source", edge.get("source_id", ""))),
             "target": str(edge.get("target", edge.get("target_id", ""))),
             "type": str(edge.get("type", "related_to")),
@@ -323,10 +347,7 @@ class GraphSession:
                 continue
             if target and normalized["target"] != target:
                 continue
-            edge_key = json.dumps(
-                [normalized["source"], normalized["type"], normalized["target"]],
-                separators=(",", ":"),
-            )
+            edge_key = str(normalized["id"])
             normalized_edges.append(normalized)
             keys.append(edge_key)
 
@@ -344,9 +365,7 @@ class GraphSession:
         next_cursor = None
         if start_index + limit < total and page_edges:
             last = page_edges[-1]
-            next_cursor = self._encode_cursor(
-                json.dumps([last["source"], last["type"], last["target"]], separators=(",", ":"))
-            )
+            next_cursor = self._encode_cursor(str(last["id"]))
 
         return page_edges, total, next_cursor
 
@@ -532,14 +551,42 @@ class GraphSession:
             ],
             "relationships": [
                 {
+                    "id": edge.get("id"),
+                    "familyId": edge.get("familyId"),
                     "source": edge.get("source"),
                     "target": edge.get("target"),
                     "type": edge.get("type", "related_to"),
+                    "weight": edge.get("weight", 1.0),
                     "metadata": edge.get("properties", {}),
                 }
                 for edge in edges
             ],
         }
+
+    def resolve_path_edge_ids(self, path_nodes: List[str]) -> List[str]:
+        if len(path_nodes) < 2:
+            return []
+
+        edge_ids: List[str] = []
+        with self._lock:
+            for index in range(len(path_nodes) - 1):
+                source_id = path_nodes[index]
+                target_id = path_nodes[index + 1]
+                candidates = [
+                    edge for edge in self.graph._adjacency.get(source_id, [])
+                    if edge.target_id == target_id
+                ]
+                if not candidates:
+                    continue
+                candidates.sort(
+                    key=lambda edge: (
+                        -float(edge.weight),
+                        str(edge.edge_type),
+                        str(edge.edge_id),
+                    )
+                )
+                edge_ids.append(str(candidates[0].edge_id))
+        return edge_ids
 
     def add_nodes(self, nodes: List[Dict[str, Any]]) -> int:
         with self._lock:

@@ -1,4 +1,4 @@
-import{i as e}from"./rolldown-runtime-B1FJdls4.js";import{T as t,a as n}from"./query-vendor-Cbp9LWgA.js";import{r}from"./index-BVBOQ8an.js";import{n as ee,t as te}from"./timeline-vendor-DxuOyw5t.js";var ne=r(),i=e(t(),1),a=n(),o=new Date(`1970-01-01T00:00:00Z`),re=new Date(`2030-01-01T00:00:00Z`),s=`playhead`,ie=500,ae=6,oe=`
+import{i as e}from"./rolldown-runtime-B1FJdls4.js";import{T as t,a as n}from"./query-vendor-Cbp9LWgA.js";import{r}from"./index-DDOaKEbH.js";import{n as ee,t as te}from"./timeline-vendor-DxuOyw5t.js";var ne=r(),i=e(t(),1),a=n(),o=new Date(`1970-01-01T00:00:00Z`),re=new Date(`2030-01-01T00:00:00Z`),s=`playhead`,ie=500,ae=6,oe=`
   .sem-timeline-wrap .vis-timeline { border: none !important; background: transparent !important; overflow: visible !important; }
   .sem-timeline-wrap .vis-panel.vis-background, .sem-timeline-wrap .vis-panel.vis-center { background: transparent !important; }
   .sem-timeline-wrap .vis-panel { border-color: rgba(88, 166, 255, 0.15) !important; }

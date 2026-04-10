@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createGraphLoadProgress } from "./graphLoading";
 import type { ApiEdge, ApiNode, GraphDataSnapshot, GraphLoadProgress, GraphLayoutSource } from "./types";
 
 interface NodeListResponse {
@@ -46,8 +47,11 @@ async function fetchAllNodes(
 
     total = data.total ?? total;
     collected.push(...data.nodes);
-    onProgress?.({
-      phase: "nodes",
+    onProgress?.(createGraphLoadProgress({
+      phase: "fetching_nodes",
+      progressKind: total ? "determinate" : "indeterminate",
+      loaded: collected.length,
+      total,
       nodesLoaded: collected.length,
       nodesTotal: total,
       edgesLoaded: 0,
@@ -55,8 +59,7 @@ async function fetchAllNodes(
       message: total
         ? `Loading nodes ${collected.length.toLocaleString()} of ${total.toLocaleString()}`
         : `Loading nodes ${collected.length.toLocaleString()}`,
-      progress: total ? Math.min(collected.length / Math.max(total, 1), 0.45) : 0.18,
-    });
+    }));
 
     if (!data.next_cursor) {
       break;
@@ -76,7 +79,9 @@ async function fetchAllEdges(
 ): Promise<ApiEdge[]> {
   let cursor: string | null = null;
   const collected: ApiEdge[] = [];
+  const seenEdgeIds = new Set<string>();
   let total: number | null = null;
+  let warnedOverTotal = false;
 
   while (true) {
     const url = new URL("/api/graph/edges", window.location.origin);
@@ -96,19 +101,38 @@ async function fetchAllEdges(
     }
 
     total = data.total ?? total;
-    const validEdges = data.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+    const validEdges = data.edges.filter((edge) => {
+      if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+        return false;
+      }
+      if (seenEdgeIds.has(edge.id)) {
+        return false;
+      }
+      seenEdgeIds.add(edge.id);
+      return true;
+    });
     collected.push(...validEdges);
-    onProgress?.({
-      phase: "edges",
+    const safeLoaded = total ? Math.min(seenEdgeIds.size, total) : seenEdgeIds.size;
+    if (!warnedOverTotal && total !== null && seenEdgeIds.size > total) {
+      warnedOverTotal = true;
+      console.warn("[graph-runtime] edge pagination returned more unique edge ids than total", {
+        uniqueEdgesLoaded: seenEdgeIds.size,
+        total,
+      });
+    }
+    onProgress?.(createGraphLoadProgress({
+      phase: "fetching_edges",
+      progressKind: total ? "determinate" : "indeterminate",
+      loaded: safeLoaded,
+      total,
       nodesLoaded: nodeProgress.loaded,
       nodesTotal: nodeProgress.total,
-      edgesLoaded: collected.length,
+      edgesLoaded: safeLoaded,
       edgesTotal: total,
       message: total
-        ? `Loading edges ${collected.length.toLocaleString()} of ${total.toLocaleString()}`
-        : `Loading edges ${collected.length.toLocaleString()}`,
-      progress: total ? 0.45 + Math.min(collected.length / Math.max(total, 1), 1) * 0.33 : 0.68,
-    });
+        ? `Loading edges ${safeLoaded.toLocaleString()} of ${total.toLocaleString()}`
+        : `Loading edges ${safeLoaded.toLocaleString()}`,
+    }));
 
     if (!data.next_cursor) {
       break;
@@ -145,15 +169,15 @@ export function useGraphData(options: UseGraphDataOptions = {}) {
     staleTime: Infinity,
     queryFn: async ({ signal }): Promise<GraphDataSnapshot> => {
       const startedAt = performance.now();
-      onProgress?.({
-        phase: "nodes",
+      onProgress?.(createGraphLoadProgress({
+        phase: "bootstrapping",
+        progressKind: "indeterminate",
         nodesLoaded: 0,
         nodesTotal: null,
         edgesLoaded: 0,
         edgesTotal: null,
-        message: "Preparing graph load",
-        progress: 0.06,
-      });
+        message: "Preparing graph session",
+      }));
 
       const nodes = await fetchAllNodes(signal, onProgress);
       const nodeIds = new Set(nodes.map((node) => node.id));
@@ -164,15 +188,15 @@ export function useGraphData(options: UseGraphDataOptions = {}) {
         onProgress,
       );
 
-      onProgress?.({
-        phase: "edges",
+      onProgress?.(createGraphLoadProgress({
+        phase: "hydrating_scene",
+        progressKind: "indeterminate",
         nodesLoaded: nodes.length,
         nodesTotal: nodes.length,
         edgesLoaded: edges.length,
         edgesTotal: edges.length,
-        message: "Preparing graph runtime",
-        progress: 0.78,
-      });
+        message: "Preparing graph runtime snapshot",
+      }));
 
       return {
         nodes,

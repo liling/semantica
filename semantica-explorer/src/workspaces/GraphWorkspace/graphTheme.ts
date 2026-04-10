@@ -1,6 +1,6 @@
 export type GraphZoomTier = "overview" | "structure" | "inspection";
 export type GraphNodeVisualState = "default" | "hovered" | "selected" | "neighbor" | "path" | "inactive" | "muted";
-export type GraphEdgeVisualState = "default" | "hovered" | "selected" | "neighbor" | "path" | "inactive" | "muted";
+export type GraphEdgeVisualState = "default" | "backbone" | "hovered" | "selected" | "neighbor" | "path" | "inactive" | "muted";
 export type GraphNodeShapeVariant = "default" | "temporal" | "inferred" | "provenance" | "selected";
 export type GraphEdgeVariant = "line" | "directional" | "bidirectionalCurve" | "parallelCurve" | "pathSignal";
 export type GraphArrowVisibilityPolicy = "hidden" | "contextual" | "always";
@@ -8,11 +8,24 @@ export type GraphLabelVisibilityPolicy = "none" | "priority" | "local" | "always
 export type GraphBadgeKind = "inferred" | "temporal" | "provenance";
 
 type GraphNodeColorMode = "base" | "selected" | "hovered" | "path" | "muted";
-type GraphEdgeColorMode = "overview" | "structure" | "inspection" | "hover" | "path" | "focus" | "muted";
+type GraphEdgeColorMode = "overview" | "backbone" | "structure" | "inspection" | "hover" | "path" | "focus" | "muted";
 
 export interface GraphTheme {
   palette: {
     semantic: string[];
+    overview: {
+      nodeBase: string;
+      nodeCore: string;
+      nodeMuted: string;
+      nodeBorder: string;
+      nodeTintMix: number;
+      nodeCoreMix: number;
+      nodeShellAlpha: number;
+      nodeCoreAlpha: number;
+      edgeBackbone: string;
+      edgeStructure: string;
+      edgeInspection: string;
+    };
     accent: {
       selected: string;
       hovered: string;
@@ -56,6 +69,46 @@ export interface GraphTheme {
     policies: Record<GraphLabelVisibilityPolicy, {
       minZoomTier: GraphZoomTier;
     }>;
+    chip: {
+      fontFamily: string;
+      fontWeight: number;
+      fontSize: number;
+      maxFontSize: number;
+      sizeScale: number;
+      paddingX: number;
+      paddingY: number;
+      radius: number;
+      offsetX: number;
+      offsetY: number;
+      background: string;
+      borderColor: string;
+      borderAlpha: number;
+      textColor: string;
+      shadowColor: string;
+      shadowAlpha: number;
+      shadowBlur: number;
+    };
+    hoverCard: {
+      fontFamily: string;
+      titleWeight: number;
+      titleSize: number;
+      metaWeight: number;
+      metaSize: number;
+      paddingX: number;
+      paddingY: number;
+      radius: number;
+      offsetX: number;
+      offsetY: number;
+      metaGap: number;
+      background: string;
+      borderColor: string;
+      borderAlpha: number;
+      textColor: string;
+      metaColor: string;
+      shadowColor: string;
+      shadowAlpha: number;
+      shadowBlur: number;
+    };
   };
   nodes: {
     backgroundScale: number;
@@ -83,6 +136,7 @@ export interface GraphTheme {
     selectedRing: {
       color: string;
       width: number;
+      nativeSize: number;
       glowAlpha: number;
       visibleFrom: GraphZoomTier;
     };
@@ -160,6 +214,35 @@ export interface GraphTheme {
       edgeAlpha: number;
       edgeLineWidth: number;
     };
+    temporalEmphasis: {
+      minZoomTier: GraphZoomTier;
+      maxHighlights: number;
+      radiusMultiplier: number;
+      glowAlpha: number;
+    };
+    semanticRegions: {
+      minZoomTier: GraphZoomTier;
+      maxRegions: number;
+      minVisibleSamples: number;
+      fogResolutionScale: number;
+      splatRadius: number;
+      blurPasses: number;
+      densityThreshold: number;
+      contourThreshold: number;
+      minMaskPixels: number;
+      minOccupancyRatio: number;
+      dominantMassRatio: number;
+      outerContourMinMaskPixels: number;
+      fogAlpha: number;
+      innerContourAlpha: number;
+      outerContourAlpha: number;
+    };
+    contours: {
+      minZoomTier: GraphZoomTier;
+      maxContours: number;
+      baseRadius: number;
+      glowAlpha: number;
+    };
     legend: {
       maxGroups: number;
     };
@@ -172,50 +255,62 @@ export interface GraphTheme {
 export const GRAPH_THEME: GraphTheme = {
   palette: {
     semantic: [
-      "#63E6FF",
-      "#30D4C7",
-      "#72A8FF",
-      "#8D7CFF",
-      "#C07CFF",
-      "#FF67D4",
-      "#FFB24D",
-      "#C5F55A",
+      "#3E79F2",
+      "#149287",
+      "#2F9F61",
+      "#555FD6",
+      "#8A56D8",
+      "#B65473",
+      "#C9922E",
     ],
+    overview: {
+      nodeBase: "#0B1320",
+      nodeCore: "#435D7A",
+      nodeMuted: "#121927",
+      nodeBorder: "#64758C",
+      nodeTintMix: 0.03,
+      nodeCoreMix: 0.52,
+      nodeShellAlpha: 0.97,
+      nodeCoreAlpha: 1,
+      edgeBackbone: "rgba(83, 111, 148, 0.04)",
+      edgeStructure: "rgba(72, 90, 118, 0.009)",
+      edgeInspection: "rgba(98, 120, 148, 0.026)",
+    },
     accent: {
-      selected: "#FFC857",
-      hovered: "#7FE0FF",
-      path: "#FFB870",
-      temporal: "#6DD6FF",
-      provenance: "#A98CFF",
-      inferred: "#FF9A61",
+      selected: "#F2D288",
+      hovered: "#8FE7FF",
+      path: "#D79056",
+      temporal: "#49D7FF",
+      provenance: "#C9A5FF",
+      inferred: "#D07B4D",
     },
     muted: {
-      fallback: "rgba(130, 145, 165, 0.12)",
-      nodeAlpha: 0.12,
-      edgeOverview: "rgba(116, 166, 255, 0.05)",
-      edgeStructure: "rgba(109, 164, 255, 0.11)",
-      edgeInspection: "rgba(146, 194, 255, 0.18)",
-      edgeFocus: "rgba(162, 184, 255, 0.34)",
+      fallback: "rgba(96, 112, 136, 0.1)",
+      nodeAlpha: 0.085,
+      edgeOverview: "rgba(82, 100, 124, 0.009)",
+      edgeStructure: "rgba(92, 112, 138, 0.02)",
+      edgeInspection: "rgba(124, 148, 176, 0.066)",
+      edgeFocus: "rgba(160, 186, 218, 0.16)",
     },
     background: {
-      canvas: "#060B17",
-      shell: "rgba(6, 13, 24, 0.76)",
-      shellBorder: "rgba(112, 196, 255, 0.14)",
-      shellGlow: "rgba(53, 123, 255, 0.16)",
-      grid: "rgba(88, 166, 255, 0.038)",
-      vignette: "rgba(1, 4, 10, 0.82)",
-      nodeBorder: "#07111C",
+      canvas: "#07101A",
+      shell: "rgba(8, 15, 26, 0.8)",
+      shellBorder: "rgba(118, 162, 207, 0.14)",
+      shellGlow: "rgba(48, 88, 140, 0.14)",
+      grid: "rgba(92, 126, 170, 0.034)",
+      vignette: "rgba(2, 5, 11, 0.84)",
+      nodeBorder: "#0C1522",
     },
   },
   zoomTiers: {
     overview: {
       maxRatio: Number.POSITIVE_INFINITY,
-      nodeScale: 0.9,
+      nodeScale: 0.66,
       labelThreshold: 0.985,
-      labelBudget: 18,
+      labelBudget: 10,
       edgePriorityThreshold: 0.72,
       arrowPriorityThreshold: Number.POSITIVE_INFINITY,
-      edgeSizeScale: 0.72,
+      edgeSizeScale: 0.34,
       showBadges: false,
       showCurves: false,
       showContextualArrows: false,
@@ -253,23 +348,63 @@ export const GRAPH_THEME: GraphTheme = {
       local: { minZoomTier: "structure" },
       always: { minZoomTier: "overview" },
     },
+    chip: {
+      fontFamily: "\"IBM Plex Sans\", Inter, system-ui, sans-serif",
+      fontWeight: 500,
+      fontSize: 10,
+      maxFontSize: 11,
+      sizeScale: 0.25,
+      paddingX: 6,
+      paddingY: 3,
+      radius: 6,
+      offsetX: 12,
+      offsetY: 10,
+      background: "rgba(8, 14, 24, 0.9)",
+      borderColor: "rgba(154, 181, 212, 0.16)",
+      borderAlpha: 0.28,
+      textColor: "#EAF3FF",
+      shadowColor: "rgba(0, 0, 0, 0.6)",
+      shadowAlpha: 0.26,
+      shadowBlur: 12,
+    },
+    hoverCard: {
+      fontFamily: "\"IBM Plex Sans\", Inter, system-ui, sans-serif",
+      titleWeight: 700,
+      titleSize: 13,
+      metaWeight: 500,
+      metaSize: 10,
+      paddingX: 10,
+      paddingY: 7,
+      radius: 12,
+      offsetX: 16,
+      offsetY: 16,
+      metaGap: 5,
+      background: "rgba(8, 14, 24, 0.94)",
+      borderColor: "rgba(154, 181, 212, 0.18)",
+      borderAlpha: 0.32,
+      textColor: "#F6FBFF",
+      metaColor: "rgba(184, 214, 255, 0.58)",
+      shadowColor: "rgba(0, 0, 0, 0.62)",
+      shadowAlpha: 0.34,
+      shadowBlur: 15,
+    },
   },
   nodes: {
     backgroundScale: 0.52,
-    mutedAlpha: 0.12,
+    mutedAlpha: 0.08,
     strokeHierarchy: {
-      overview: { base: 0.8, emphasis: 1.2, muted: 0.45 },
+      overview: { base: 0.05, emphasis: 0.34, muted: 0.02 },
       structure: { base: 1.05, emphasis: 1.45, muted: 0.55 },
       inspection: { base: 1.2, emphasis: 1.7, muted: 0.6 },
     },
     states: {
-      default: { color: "base", sizeMultiplier: 1, minSize: 1.45, forceLabel: false, zIndex: 0, borderBoost: 0 },
-      hovered: { color: "hovered", sizeMultiplier: 1.34, minSize: 16, forceLabel: true, zIndex: 4, borderBoost: 0.5 },
-      selected: { color: "selected", sizeMultiplier: 1.18, minSize: 12, forceLabel: true, zIndex: 3, borderBoost: 0.42 },
-      neighbor: { color: "base", sizeMultiplier: 1.08, minSize: 7.2, forceLabel: true, zIndex: 2, borderBoost: 0.18 },
-      path: { color: "path", sizeMultiplier: 1.08, minSize: 7.2, forceLabel: true, zIndex: 2, borderBoost: 0.24 },
-      inactive: { color: "muted", sizeMultiplier: 0.52, minSize: 0.8, forceLabel: false, zIndex: 0, borderBoost: -0.15 },
-      muted: { color: "muted", sizeMultiplier: 0.52, minSize: 0.8, forceLabel: false, zIndex: 0, borderBoost: -0.15 },
+      default: { color: "base", sizeMultiplier: 0.72, minSize: 0.68, forceLabel: false, zIndex: 0, borderBoost: -0.42 },
+      hovered: { color: "hovered", sizeMultiplier: 1.18, minSize: 12.5, forceLabel: true, zIndex: 4, borderBoost: 0.22 },
+      selected: { color: "selected", sizeMultiplier: 1.06, minSize: 10.5, forceLabel: true, zIndex: 3, borderBoost: 0.2 },
+      neighbor: { color: "base", sizeMultiplier: 0.84, minSize: 4.8, forceLabel: true, zIndex: 2, borderBoost: -0.08 },
+      path: { color: "path", sizeMultiplier: 1.01, minSize: 6.2, forceLabel: true, zIndex: 2, borderBoost: 0.08 },
+      inactive: { color: "muted", sizeMultiplier: 0.32, minSize: 0.46, forceLabel: false, zIndex: 0, borderBoost: -0.42 },
+      muted: { color: "muted", sizeMultiplier: 0.32, minSize: 0.46, forceLabel: false, zIndex: 0, borderBoost: -0.42 },
     },
     variants: {
       default: { sizeMultiplier: 1, borderBoost: 0, haloBoost: 0, badgeVisibleFrom: "inspection" },
@@ -279,35 +414,37 @@ export const GRAPH_THEME: GraphTheme = {
       selected: { sizeMultiplier: 1.06, borderBoost: 0.22, haloBoost: 0.16, badgeVisibleFrom: "overview" },
     },
     selectedRing: {
-      color: "#FFC857",
-      width: 2.4,
-      glowAlpha: 0.38,
-      visibleFrom: "inspection",
+      color: "#E7C57C",
+      width: 1.9,
+      nativeSize: 2.2,
+      glowAlpha: 0.2,
+      visibleFrom: "overview",
     },
     badges: {
-      inferred: { color: "#FF9A61", label: "I" },
-      temporal: { color: "#6DD6FF", label: "T" },
-      provenance: { color: "#A98CFF", label: "P" },
+      inferred: { color: "#C98658", label: "I" },
+      temporal: { color: "#52CDEF", label: "T" },
+      provenance: { color: "#A289D0", label: "P" },
     },
     badge: {
       radius: 7,
       offset: 3,
       fontSize: 8,
       textColor: "#08111d",
-      background: "rgba(8, 17, 29, 0.9)",
-      stroke: "rgba(255,255,255,0.2)",
-      glowAlpha: 0.34,
+      background: "rgba(8, 17, 29, 0.84)",
+      stroke: "rgba(255,255,255,0.14)",
+      glowAlpha: 0.24,
     },
   },
   edges: {
     states: {
-      default: { color: "inspection", sizeMultiplier: 1, minSize: 0.72, zIndex: 0, forceArrow: false, hide: false },
-      hovered: { color: "hover", sizeMultiplier: 1.55, minSize: 1.8, zIndex: 3, forceArrow: true, hide: false },
-      selected: { color: "hover", sizeMultiplier: 1.55, minSize: 1.8, zIndex: 3, forceArrow: true, hide: false },
-      neighbor: { color: "focus", sizeMultiplier: 1.08, minSize: 0.95, zIndex: 1, forceArrow: false, hide: false },
-      path: { color: "path", sizeMultiplier: 1.7, minSize: 2.2, zIndex: 4, forceArrow: true, hide: false },
-      inactive: { color: "muted", sizeMultiplier: 1, minSize: 0.45, zIndex: 0, forceArrow: false, hide: true },
-      muted: { color: "muted", sizeMultiplier: 1, minSize: 0.45, zIndex: 0, forceArrow: false, hide: true },
+      default: { color: "structure", sizeMultiplier: 0.74, minSize: 0.18, zIndex: 0, forceArrow: false, hide: false },
+      backbone: { color: "backbone", sizeMultiplier: 0.72, minSize: 0.18, zIndex: 1, forceArrow: false, hide: false },
+      hovered: { color: "hover", sizeMultiplier: 1.42, minSize: 1.45, zIndex: 3, forceArrow: true, hide: false },
+      selected: { color: "hover", sizeMultiplier: 1.42, minSize: 1.45, zIndex: 3, forceArrow: true, hide: false },
+      neighbor: { color: "focus", sizeMultiplier: 0.92, minSize: 0.5, zIndex: 1, forceArrow: false, hide: false },
+      path: { color: "path", sizeMultiplier: 1.5, minSize: 1.8, zIndex: 4, forceArrow: true, hide: false },
+      inactive: { color: "muted", sizeMultiplier: 1, minSize: 0.16, zIndex: 0, forceArrow: false, hide: true },
+      muted: { color: "muted", sizeMultiplier: 1, minSize: 0.16, zIndex: 0, forceArrow: false, hide: true },
     },
     variants: {
       line: { baseType: "line", arrowPolicy: "hidden", curveStrength: 0, sizeMultiplier: 1, glowAlpha: 0 },
@@ -318,8 +455,8 @@ export const GRAPH_THEME: GraphTheme = {
     },
   },
   overlays: {
-    hoverGlowAlpha: 0.26,
-    pathGlowAlpha: 0.2,
+    hoverGlowAlpha: 0.18,
+    pathGlowAlpha: 0.16,
     glowRadiusMultiplier: 4.8,
     minGlowRadius: 16,
     pulseRadius: 11,
@@ -359,6 +496,35 @@ export const GRAPH_THEME: GraphTheme = {
       glowAlpha: 0.18,
       edgeAlpha: 0.42,
       edgeLineWidth: 1.8,
+    },
+    temporalEmphasis: {
+      minZoomTier: "structure",
+      maxHighlights: 48,
+      radiusMultiplier: 4.2,
+      glowAlpha: 0.12,
+    },
+    semanticRegions: {
+      minZoomTier: "overview",
+      maxRegions: 3,
+      minVisibleSamples: 14,
+      fogResolutionScale: 0.22,
+      splatRadius: 13,
+      blurPasses: 2,
+      densityThreshold: 0.16,
+      contourThreshold: 0.28,
+      minMaskPixels: 170,
+      minOccupancyRatio: 0.0022,
+      dominantMassRatio: 0.62,
+      outerContourMinMaskPixels: 240,
+      fogAlpha: 0.11,
+      innerContourAlpha: 0.16,
+      outerContourAlpha: 0.045,
+    },
+    contours: {
+      minZoomTier: "overview",
+      maxContours: 3,
+      baseRadius: 88,
+      glowAlpha: 0.055,
     },
     legend: {
       maxGroups: 8,
@@ -434,6 +600,35 @@ export function darkenHex(hexColor: string, amount: number): string {
   const blue = clampChannel(Number.parseInt(normalized.slice(4, 6), 16) - amount);
 
   return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function blendHex(baseColor: string, tintColor: string, amount: number): string {
+  if (!baseColor.startsWith("#") || !tintColor.startsWith("#")) {
+    return tintColor || baseColor;
+  }
+
+  const normalize = (value: string) => {
+    const hex = value.slice(1);
+    return hex.length === 3
+      ? hex.split("").map((char) => `${char}${char}`).join("")
+      : hex;
+  };
+
+  const base = normalize(baseColor);
+  const tint = normalize(tintColor);
+  if (base.length !== 6 || tint.length !== 6) {
+    return tintColor || baseColor;
+  }
+
+  const mix = clamp(0, amount, 1);
+  const mixChannel = (left: number, right: number) => Math.round(left + (right - left) * mix);
+  const channels = [0, 2, 4].map((offset) => {
+    const left = Number.parseInt(base.slice(offset, offset + 2), 16);
+    const right = Number.parseInt(tint.slice(offset, offset + 2), 16);
+    return mixChannel(left, right).toString(16).padStart(2, "0");
+  });
+
+  return `#${channels.join("")}`;
 }
 
 export function getZoomTier(ratio: number): GraphZoomTier {

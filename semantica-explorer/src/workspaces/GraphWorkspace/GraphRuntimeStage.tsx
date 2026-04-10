@@ -1,8 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { batchMergeEdges, batchMergeNodes, clearGraph, graph, type EdgeAttributes, type NodeAttributes } from "../../store/graphStore";
-import { GraphCanvas } from "./GraphCanvas";
-import type { GraphCanvasHandle } from "./GraphCanvas";
+import { SigmaSceneAdapter } from "./SigmaSceneAdapter";
+import { createGraphLoadProgress } from "./graphLoading";
 import {
   chooseColorAccessor,
   colorForNodeKey,
@@ -13,6 +13,7 @@ import {
   deterministicPosition,
 } from "./graphAnalytics";
 import { GRAPH_THEME } from "./graphConfig";
+import type { GraphSceneHandle } from "./scene";
 import type {
   GraphDataSnapshot,
   GraphEffectsState,
@@ -29,6 +30,12 @@ const STAGE_EFFECTS_STATE: GraphEffectsState = {
   pathPulseEnabled: false,
   pathFlowEnabled: false,
   lensEnabled: false,
+  temporalEmphasisEnabled: false,
+  semanticRegionsEnabled: false,
+  contoursEnabled: false,
+  pathfindingEnabled: false,
+  communitiesEnabled: false,
+  centralityEnabled: false,
   legendEnabled: false,
   diagnosticsEnabled: false,
   lensMode: "neighborhood",
@@ -102,7 +109,7 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
     },
     ref,
   ) {
-    const canvasRef = useRef<GraphCanvasHandle>(null);
+    const sceneRef = useRef<GraphSceneHandle>(null);
     const prevActiveIdsRef = useRef<Set<string>>(new Set());
     const [graphVersion, setGraphVersion] = useState(0);
     const [runtimeLayoutSource, setRuntimeLayoutSource] = useState<GraphLayoutSource>(snapshot?.summary.layoutSource ?? "runtime");
@@ -110,8 +117,8 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
     const stageSignature = useMemo(() => (snapshot ? `${snapshot.fetchedAt}:${snapshot.summary.nodeCount}:${snapshot.summary.edgeCount}` : null), [snapshot]);
 
     useImperativeHandle(ref, () => ({
-      fitView: () => canvasRef.current?.fitView(),
-      focusNode: (nodeId: string) => canvasRef.current?.focusNode(nodeId),
+      fitView: () => sceneRef.current?.fitView(),
+      focusNode: (nodeId: string) => sceneRef.current?.focusNode(nodeId),
     }), []);
 
     useEffect(() => {
@@ -122,15 +129,16 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
           return;
         }
 
-        onProgressChange({
-          phase: "styling",
+        onProgressChange(createGraphLoadProgress({
+          phase: "computing_styling",
+          progressKind: "indeterminate",
           nodesLoaded: snapshot.summary.nodeCount,
           nodesTotal: snapshot.summary.nodeCount,
           edgesLoaded: snapshot.summary.edgeCount,
           edgesTotal: snapshot.summary.edgeCount,
-          message: "Computing graph styling",
-          progress: 0.88,
-        });
+          message: "Computing runtime graph styling",
+          showGraphBehind: false,
+        }));
 
         const degreeByNode = computeDegreeMap(snapshot.nodes, snapshot.edges);
         const pageRankByNode = computePageRank(snapshot.nodes, snapshot.edges);
@@ -191,15 +199,16 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
           return;
         }
 
-        onProgressChange({
-          phase: "rendering",
+        onProgressChange(createGraphLoadProgress({
+          phase: "hydrating_scene",
+          progressKind: "indeterminate",
           nodesLoaded: snapshot.summary.nodeCount,
           nodesTotal: snapshot.summary.nodeCount,
           edgesLoaded: snapshot.summary.edgeCount,
           edgesTotal: snapshot.summary.edgeCount,
-          message: "Rendering graph",
-          progress: 0.96,
-        });
+          message: "Hydrating graph scene and renderer",
+          showGraphBehind: false,
+        }));
 
         const nodesToMerge = draftAttributes.map(({ id, attributes }) => {
           const colorKey = colorAccessor(id, attributes);
@@ -223,9 +232,15 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
         });
 
         const edgesToMerge = snapshot.edges.map((edge) => ({
+          id: edge.id,
+          familyId: edge.familyId,
           source: edge.source,
           target: edge.target,
           attributes: {
+            edgeId: edge.id,
+            familyId: edge.familyId,
+            sourceId: edge.source,
+            targetId: edge.target,
             weight: edge.weight,
             edgeType: edge.type,
             properties: edge.properties,
@@ -258,23 +273,26 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
 
         onLayoutRunningChange(layoutSource === "runtime");
         if (selectedNodeId) {
-          canvasRef.current?.focusNode(selectedNodeId);
+          sceneRef.current?.focusNode(selectedNodeId);
         } else {
-          canvasRef.current?.getSigma()?.refresh();
+          sceneRef.current?.getRuntime()?.requestRender();
         }
         setGraphVersion((current) => current + 1);
         if (layoutSource !== "runtime") {
           onProgressChange(null);
         } else {
-          onProgressChange({
-            phase: "rendering",
+          onProgressChange(createGraphLoadProgress({
+            phase: "stabilizing_layout",
+            progressKind: "indeterminate",
             nodesLoaded: snapshot.summary.nodeCount,
             nodesTotal: snapshot.summary.nodeCount,
             edgesLoaded: snapshot.summary.edgeCount,
             edgesTotal: snapshot.summary.edgeCount,
-            message: "Stabilizing full-graph layout",
-            progress: 0.98,
-          });
+            message: "Settling runtime layout",
+            showGraphBehind: true,
+            layoutSource,
+            layoutState: "bootstrapping",
+          }));
         }
         onRuntimeReady();
       }
@@ -333,7 +351,7 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
 
             prevActiveIdsRef.current = nextActiveIds;
             onActiveNodeCountChange(data.active_node_count);
-            canvasRef.current?.getSigma()?.refresh();
+            sceneRef.current?.getRuntime()?.requestRender();
           });
         } catch (error) {
           if (!cancelled) {
@@ -392,9 +410,15 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
           if (eventType === "ADD_EDGE" && payload?.source_id && payload?.target_id) {
             batchMergeEdges([
               {
+                id: String(payload.id),
+                familyId: payload.familyId ? String(payload.familyId) : String(payload.id),
                 source: payload.source_id,
                 target: payload.target_id,
                 attributes: {
+                  edgeId: String(payload.id),
+                  familyId: payload.familyId ? String(payload.familyId) : String(payload.id),
+                  sourceId: payload.source_id,
+                  targetId: payload.target_id,
                   weight: Number(payload.weight ?? 1),
                   edgeType: payload.type,
                   properties: payload.properties || {},
@@ -407,7 +431,7 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
             ]);
           }
 
-          canvasRef.current?.getSigma()?.refresh();
+          sceneRef.current?.getRuntime()?.requestRender();
           setGraphVersion((current) => current + 1);
         } catch (error) {
           console.error("[GraphRuntimeStage] websocket update failed", error);
@@ -420,9 +444,10 @@ export const GraphRuntimeStage = forwardRef<GraphStageHandle, GraphRuntimeStageP
     }, []);
 
     return (
-      <GraphCanvas
-        ref={canvasRef}
-        onNodeClick={onNodeSelect}
+      <SigmaSceneAdapter
+        ref={sceneRef}
+        onNodeSelect={onNodeSelect}
+        selectedEdgeId=""
         selectedNodeId={selectedNodeId}
         activePath={activePath}
         effectsState={STAGE_EFFECTS_STATE}

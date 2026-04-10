@@ -1,8 +1,17 @@
 export type GraphViewMode = "focused" | "full";
 export type GraphLayoutSource = "provided" | "carried" | "runtime";
 export type GraphLayoutState = "idle" | "bootstrapping" | "running" | "stabilized" | "interactive" | "failed";
+export type GraphLoadPhase =
+  | "bootstrapping"
+  | "fetching_nodes"
+  | "fetching_edges"
+  | "computing_styling"
+  | "hydrating_scene"
+  | "stabilizing_layout"
+  | "ready";
+export type GraphLoadProgressKind = "determinate" | "indeterminate";
 export type GraphNodeInteractionState = "default" | "hovered" | "selected" | "neighbor" | "path" | "inactive" | "muted";
-export type GraphEdgeInteractionState = "default" | "hovered" | "selected" | "neighbor" | "path" | "inactive" | "muted";
+export type GraphEdgeInteractionState = "default" | "backbone" | "hovered" | "selected" | "neighbor" | "path" | "inactive" | "muted";
 
 export interface GraphCameraState {
   x: number;
@@ -13,8 +22,10 @@ export interface GraphCameraState {
 export interface GraphInteractionState {
   hoveredNodeId: string | null;
   selectedNodeId: string;
+  selectedEdgeId: string;
   focusedNodeId: string;
   activePath: string[];
+  activePathEdgeIds: string[];
   viewMode: GraphViewMode;
   zoomTier: "overview" | "structure" | "inspection";
   isLayoutRunning: boolean;
@@ -24,6 +35,12 @@ export type GraphEffectToggle =
   | "pathPulseEnabled"
   | "pathFlowEnabled"
   | "lensEnabled"
+  | "temporalEmphasisEnabled"
+  | "semanticRegionsEnabled"
+  | "contoursEnabled"
+  | "pathfindingEnabled"
+  | "communitiesEnabled"
+  | "centralityEnabled"
   | "legendEnabled"
   | "diagnosticsEnabled";
 
@@ -31,6 +48,12 @@ export interface GraphEffectsState {
   pathPulseEnabled: boolean;
   pathFlowEnabled: boolean;
   lensEnabled: boolean;
+  temporalEmphasisEnabled: boolean;
+  semanticRegionsEnabled: boolean;
+  contoursEnabled: boolean;
+  pathfindingEnabled: boolean;
+  communitiesEnabled: boolean;
+  centralityEnabled: boolean;
   legendEnabled: boolean;
   diagnosticsEnabled: boolean;
   lensMode: "neighborhood";
@@ -55,9 +78,93 @@ export interface GraphDiagnosticsSnapshot {
     pathPulse: GraphEffectAvailability;
     pathFlow: GraphEffectAvailability;
     lens: GraphEffectAvailability;
+    temporalEmphasis: GraphEffectAvailability;
+    semanticRegions: GraphEffectAvailability;
+    contours: GraphEffectAvailability;
+    pathfinding: GraphEffectAvailability;
+    communities: GraphEffectAvailability;
+    centrality: GraphEffectAvailability;
     legend: GraphEffectAvailability;
     diagnostics: GraphEffectAvailability;
   };
+}
+
+export interface GraphTemporalState {
+  currentTime: Date | null;
+  activeNodeCount: number | null;
+  minDate?: string;
+  maxDate?: string;
+}
+
+export interface GraphDirectedPathSnapshot {
+  ready: boolean;
+  reason: string;
+  sourceId: string | null;
+  targetId: string | null;
+  path: string[];
+  length: number | null;
+  verifiedAgainstActivePath: boolean;
+}
+
+export interface GraphCommunitySummary {
+  communityId: string;
+  nodeCount: number;
+  visibleNodeCount: number;
+  dominantSemanticGroup: string;
+  color: string;
+  anchorNodeId: string | null;
+  anchorLabel: string;
+  prominence: number;
+}
+
+export interface GraphSemanticRegionSummary {
+  semanticGroup: string;
+  nodeCount: number;
+  visibleNodeCount: number;
+  color: string;
+  anchorNodeId: string | null;
+  anchorLabel: string;
+  dominantCommunityId: string | null;
+  prominence: number;
+}
+
+export interface GraphCentralityNodeSummary {
+  id: string;
+  label: string;
+  semanticGroup: string;
+  color: string;
+  degree: number;
+  betweenness: number;
+  score: number;
+}
+
+export interface GraphOverviewBackboneSnapshot {
+  ready: boolean;
+  reason: string;
+  edgeIds: string[];
+}
+
+export interface GraphAnalyticsSnapshot {
+  generatedAt: number;
+  directedPath: GraphDirectedPathSnapshot;
+  communities: {
+    ready: boolean;
+    reason: string;
+    count: number;
+    modularity: number | null;
+    summaries: GraphCommunitySummary[];
+  };
+  centrality: {
+    ready: boolean;
+    reason: string;
+    topNodes: GraphCentralityNodeSummary[];
+  };
+  semanticRegions: {
+    ready: boolean;
+    reason: string;
+    summaries: GraphSemanticRegionSummary[];
+  };
+  overviewBackbone: GraphOverviewBackboneSnapshot;
 }
 
 export interface ApiNode {
@@ -72,6 +179,8 @@ export interface ApiNode {
 }
 
 export interface ApiEdge {
+  id: string;
+  familyId: string;
   source: string;
   target: string;
   type: string;
@@ -89,13 +198,21 @@ export interface GraphLoadSummary {
 }
 
 export interface GraphLoadProgress {
-  phase: "nodes" | "edges" | "styling" | "rendering";
+  phase: GraphLoadPhase;
+  title: string;
   nodesLoaded: number;
   nodesTotal: number | null;
   edgesLoaded: number;
   edgesTotal: number | null;
   message: string;
-  progress: number;
+  progressKind: GraphLoadProgressKind;
+  loaded: number | null;
+  total: number | null;
+  showGraphBehind: boolean;
+  stageIndex?: number;
+  stageCount?: number;
+  layoutSource?: GraphLayoutSource;
+  layoutState?: GraphLayoutState;
 }
 
 export interface GraphDataSnapshot {
@@ -128,6 +245,21 @@ export interface GraphSelectedNodeState {
   valid_until?: string | null;
   properties: Record<string, unknown>;
   neighborCount: number;
+}
+
+export interface GraphSelectedEdgeState {
+  id: string;
+  familyId: string;
+  sourceId: string;
+  sourceLabel: string;
+  targetId: string;
+  targetLabel: string;
+  edgeType: string;
+  weight: number;
+  properties: Record<string, unknown>;
+  provenanceCount: number;
+  familySize: number;
+  siblingCount: number;
 }
 
 export interface GraphStageHandle {

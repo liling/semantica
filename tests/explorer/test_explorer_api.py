@@ -193,6 +193,43 @@ class TestGraphEdges:
             {json.dumps(edge, sort_keys=True) for edge in second_payload["edges"]}
         )
 
+    def test_list_edges_repeated_request_is_stable(self, client):
+        first_response = client.get("/api/graph/edges?limit=20")
+        second_response = client.get("/api/graph/edges?limit=20")
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert first_response.json() == second_response.json()
+
+    def test_list_edges_pagination_union_matches_total(self, client):
+        cursor = None
+        seen_ids: set[str] = set()
+        seen_rows: set[str] = set()
+        total = None
+
+        while True:
+            url = "/api/graph/edges?limit=2"
+            if cursor:
+                url = f"{url}&cursor={cursor}"
+            response = client.get(url)
+            assert response.status_code == 200
+            payload = response.json()
+            total = payload["total"] if total is None else total
+
+            for edge in payload["edges"]:
+                row_key = json.dumps(edge, sort_keys=True)
+                assert row_key not in seen_rows
+                seen_rows.add(row_key)
+                assert edge["id"] not in seen_ids
+                seen_ids.add(edge["id"])
+
+            cursor = payload["next_cursor"]
+            if not cursor:
+                break
+
+        assert total is not None
+        assert len(seen_ids) == total
+
 
 class TestSearchAndStats:
     def test_search(self, client):
@@ -385,12 +422,14 @@ class TestImportExport:
                     {"id": "meta_tgt", "type": "test", "properties": {"content": "tgt"}},
                 ],
                 "edges": [
-                    {
-                        "source": "meta_src",
-                        "target": "meta_tgt",
-                        "type": "tagged",
-                        "metadata": {"label": "important", "weight": 0.7},
-                    }
+                {
+                    "id": "meta-edge-1",
+                    "familyId": "meta-family",
+                    "source": "meta_src",
+                    "target": "meta_tgt",
+                    "type": "tagged",
+                    "metadata": {"label": "important", "weight": 0.7},
+                }
                 ],
             }
         )
@@ -406,7 +445,10 @@ class TestImportExport:
 
         edge_lookup = client.get("/api/graph/edges?source=meta_src&target=meta_tgt")
         assert edge_lookup.status_code == 200
-        props = edge_lookup.json()["edges"][0]["properties"]
+        edge_payload = edge_lookup.json()["edges"][0]
+        props = edge_payload["properties"]
+        assert edge_payload["id"] == "meta-edge-1"
+        assert edge_payload["familyId"] == "meta-family"
         assert props["label"] == "important"
 
     def test_import_csv(self, client):
@@ -518,3 +560,81 @@ class TestGenericGraphFileLoading:
             payload = edges.json()
             assert payload["total"] == 1
             assert payload["edges"][0]["type"] == "candidate"
+
+    def test_generic_file_loading_assigns_stable_legacy_edge_ids(self):
+        payload = {
+            "nodes": [
+                {"id": "legacy_src", "type": "entity", "properties": {"content": "Legacy source"}},
+                {"id": "legacy_tgt", "type": "entity", "properties": {"content": "Legacy target"}},
+            ],
+            "edges": [
+                {
+                    "source": "legacy_src",
+                    "target": "legacy_tgt",
+                    "type": "related_to",
+                    "weight": 0.75,
+                    "metadata": {"evidence": "legacy"},
+                }
+            ],
+        }
+        graph_path = self._write_graph_payload(payload)
+
+        session_one = GraphSession.from_file(str(graph_path))
+        session_two = GraphSession.from_file(str(graph_path))
+
+        edges_one, total_one = session_one.get_edges(limit=10)
+        edges_two, total_two = session_two.get_edges(limit=10)
+
+        assert total_one == 1
+        assert total_two == 1
+        assert edges_one[0]["id"] == edges_two[0]["id"]
+        assert edges_one[0]["familyId"] == edges_two[0]["familyId"]
+
+    def test_multi_edges_same_pair_paginate_as_distinct_stable_edges(self):
+        graph = ContextGraph(advanced_analytics=False)
+        graph.add_node("shared_src", node_type="entity", content="Shared source")
+        graph.add_node("shared_tgt", node_type="entity", content="Shared target")
+        graph.add_edges(
+            [
+                {
+                    "id": "edge-alpha",
+                    "familyId": "family-shared",
+                    "source_id": "shared_src",
+                    "target_id": "shared_tgt",
+                    "type": "supports",
+                    "weight": 0.9,
+                    "properties": {"provenance": "paper-a"},
+                },
+                {
+                    "id": "edge-beta",
+                    "familyId": "family-shared",
+                    "source_id": "shared_src",
+                    "target_id": "shared_tgt",
+                    "type": "contradicts",
+                    "weight": 0.6,
+                    "properties": {"provenance": "paper-b"},
+                },
+            ]
+        )
+
+        app = create_app(session=GraphSession(graph))
+        with TestClient(app) as test_client:
+            first = test_client.get("/api/graph/edges?source=shared_src&target=shared_tgt&limit=1")
+            assert first.status_code == 200
+            first_payload = first.json()
+            assert first_payload["total"] == 2
+            assert len(first_payload["edges"]) == 1
+            assert first_payload["edges"][0]["familyId"] == "family-shared"
+
+            second = test_client.get(
+                f"/api/graph/edges?source=shared_src&target=shared_tgt&limit=1&cursor={first_payload['next_cursor']}"
+            )
+            assert second.status_code == 200
+            second_payload = second.json()
+            assert len(second_payload["edges"]) == 1
+            assert first_payload["edges"][0]["id"] != second_payload["edges"][0]["id"]
+
+            repeat = test_client.get("/api/graph/edges?source=shared_src&target=shared_tgt&limit=10")
+            assert repeat.status_code == 200
+            repeat_ids = [edge["id"] for edge in repeat.json()["edges"]]
+            assert repeat_ids == ["edge-alpha", "edge-beta"]

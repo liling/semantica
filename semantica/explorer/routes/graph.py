@@ -156,12 +156,14 @@ async def find_path(
 
     path_nodes = result.get("path", []) if isinstance(result, dict) else (result or [])
     total_weight = result.get("total_weight", 0.0) if isinstance(result, dict) else 0.0
+    edge_ids = await asyncio.to_thread(session.resolve_path_edge_ids, path_nodes)
 
     return PathResponse(
         source=node_id,
         target=target,
         algorithm=algorithm,
         path=path_nodes,
+        edge_ids=edge_ids,
         total_weight=total_weight,
     )
 

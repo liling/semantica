@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **OWLGenerator user-facing schema compatibility fixes** (Issue #446):
+  - Fixed OWL class/property IRI identifier fallback order to prefer `label` and then `name`.
+  - Fixed datatype property handling to accept scalar and list `range` values in rdflib path (including `xsd:*`, full IRIs, and local names), preventing list-based `.startswith()` crashes.
+  - Fixed generated class/property/domain/range IRIs to use the current ontology dict `uri` namespace for each generation call (instead of drifting to default namespace manager base URI when per-entity `uri` is omitted).
+  - Fixed `subClassOf` / `subclassOf` parent resolution so local class names are expanded to ontology IRIs consistently with domain/range behavior.
+  - Added/expanded regression coverage in `tests/ontology/test_ontology_comprehensive.py` (`test_owl_generator_user_facing_schema_compatibility`) for label-first fallback, lowercase `subclassOf`, datatype range lists, and ontology namespace consistency.
+
 - **SKOS Vocabulary Module** (PR #319 by @KaifAhmad1):
   - **Namespace helpers** (`semantica/ontology/namespace_manager.py`): Added `get_skos_uri(local_name)` — returns the full `http://www.w3.org/2004/02/skos/core#<local_name>` URI for any SKOS term. Added `build_concept_scheme_uri(name)` — slugifies a human-readable vocabulary name (spaces/special chars → hyphens, lower-cased) and anchors the result at the configured base URI as `<base>/vocab/<slug>`.
   - **Triplet-store SKOS helpers** (`semantica/triplet_store/triplet_store.py`): Added `add_skos_concept(concept_uri, scheme_uri, pref_label, alt_labels, broader, narrower, related, definition, notation)` — assembles and stores all required SKOS triples (auto-declares the `skos:ConceptScheme`, asserts `rdf:type skos:Concept`, `skos:inScheme`, `skos:prefLabel`, and all optional predicates) via the existing `add_triplets()` API; no new storage paths introduced. Added `get_skos_concepts(scheme_uri=None)` — issues a SPARQL `SELECT` via `execute_query()` and collapses multi-valued `altLabel`/`broader`/`narrower`/`related` bindings into structured concept dicts; optional `scheme_uri` restricts results to one vocabulary.
@@ -1080,6 +1087,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **OWLGenerator user-facing schema compatibility fixes** (Issue #446):
+  - Fixed OWL class/property IRI identifier fallback order to prefer label and then 
+ame.
+  - Fixed datatype property handling to accept scalar and list 
+ange values in rdflib path (including xsd:*, full IRIs, and local names), preventing list-based .startswith() crashes.
+  - Fixed generated class/property/domain/range IRIs to use the current ontology dict uri namespace for each generation call (instead of drifting to default namespace manager base URI when per-entity uri is omitted).
+  - Fixed subClassOf / subclassOf parent resolution so local class names are expanded to ontology IRIs consistently with domain/range behavior.
+  - Added/expanded regression coverage in 	ests/ontology/test_ontology_comprehensive.py (	est_owl_generator_user_facing_schema_compatibility) for label-first fallback, lowercase subclassOf, datatype range lists, and ontology namespace consistency.
 
 - Fixed: PolicyEngine latest version selection on ContextGraph; AgentContext fallback robustness and secure logging (PR #TBD by @KaifAhmad1)
 - Tests: Added ContextGraph fallback and AgentContext smoke tests; full suite passing
@@ -1627,6 +1642,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- **OWLGenerator user-facing schema compatibility fixes** (Issue #446):
+  - Fixed OWL class/property IRI identifier fallback order to prefer label and then 
+ame.
+  - Fixed datatype property handling to accept scalar and list 
+ange values in rdflib path (including xsd:*, full IRIs, and local names), preventing list-based .startswith() crashes.
+  - Fixed generated class/property/domain/range IRIs to use the current ontology dict uri namespace for each generation call (instead of drifting to default namespace manager base URI when per-entity uri is omitted).
+  - Fixed subClassOf / subclassOf parent resolution so local class names are expanded to ontology IRIs consistently with domain/range behavior.
+  - Added/expanded regression coverage in 	ests/ontology/test_ontology_comprehensive.py (	est_owl_generator_user_facing_schema_compatibility) for label-first fallback, lowercase subclassOf, datatype range lists, and ontology namespace consistency.
 
 - Fixed: PolicyEngine latest version selection on ContextGraph; AgentContext fallback robustness and secure logging (PR #TBD by @KaifAhmad1)
 - Tests: Added ContextGraph fallback and AgentContext smoke tests; full suite passing
@@ -2165,4 +2188,6 @@ When breaking changes are introduced, migration guides will be provided in the r
 ---
 
 For detailed release notes, see [GitHub Releases](https://github.com/Hawksight-AI/semantica/releases).
+
+
 

@@ -176,14 +176,18 @@ class TestOntologyComprehensive(unittest.TestCase):
             "name": "UserFacingOntology",
             "uri": "http://example.org/ontology/",
             "classes": [
-                {"name": "Person", "subclassOf": "http://example.org/ontology/Agent"},
+                # label should be preferred over name for generated class IRI
+                {"name": "Human", "label": "Person", "subclassOf": "Agent"},
             ],
             "properties": [
                 {
-                    "name": "birthDate",
+                    # label should be preferred over name for generated property IRI
+                    "name": "birthDateInternal",
+                    "label": "birthDate",
                     "type": "datatype",
                     "domain": "Person",
-                    "range": "xsd:date",
+                    # datatype range may be list in user-facing schema
+                    "range": ["xsd:date", "http://example.org/ontology/CustomDateType"],
                 }
             ],
         }
@@ -194,6 +198,10 @@ class TestOntologyComprehensive(unittest.TestCase):
         self.assertIn("rdfs:subClassOf", owl_output)
         self.assertIn("birthDate", owl_output)
         self.assertIn("xsd:date", owl_output)
+        self.assertIn("CustomDateType", owl_output)
+        self.assertIn(":Person", owl_output)
+        self.assertIn(":Agent", owl_output)
+        self.assertNotIn("https://semantica.dev/ontology/", owl_output)
 
     # --- OntologyValidator Tests ---
     # Removed as per request

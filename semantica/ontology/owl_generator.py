@@ -29,6 +29,7 @@ License: MIT
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urljoin
 
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.helpers import ensure_directory
@@ -174,11 +175,45 @@ class OWLGenerator:
             "datatypeproperty",
         }
 
+    def _get_generation_namespace_manager(self, ontology: Dict[str, Any]) -> NamespaceManager:
+        """Build a namespace manager anchored to the ontology base URI for this call."""
+        base_uri = ontology.get("uri") or self.namespace_manager.get_base_uri()
+        if isinstance(base_uri, str) and not base_uri.endswith(("/", "#")):
+            base_uri = base_uri + "/"
+        return NamespaceManager(
+            base_uri=base_uri,
+            version=self.namespace_manager.version,
+            use_speaking_iris=self.namespace_manager.use_speaking_iris,
+        )
+
+    @staticmethod
+    def _is_http_uri(value: Any) -> bool:
+        return isinstance(value, str) and value.startswith(("http://", "https://"))
+
+    def _resolve_class_uri(self, value: Any, ns_manager: NamespaceManager) -> str:
+        if self._is_http_uri(value):
+            return value
+        return ns_manager.generate_class_iri(str(value))
+
+    def _resolve_property_identifier(self, prop: Dict[str, Any]) -> str:
+        return prop.get("label") or prop.get("name")
+
+    def _resolve_class_identifier(self, cls: Dict[str, Any]) -> str:
+        return cls.get("label") or cls.get("name")
+
+    def _resolve_datatype_range_uri(self, range_val: Any, ns_manager: NamespaceManager):
+        if isinstance(range_val, str) and range_val.startswith("xsd:"):
+            return XSD[range_val.replace("xsd:", "")]
+        if self._is_http_uri(range_val):
+            return URIRef(range_val)
+        return URIRef(ns_manager.generate_class_iri(str(range_val)))
+
     def _generate_with_rdflib(
         self, ontology: Dict[str, Any], format: str = "turtle", **options
     ) -> Union[str, Graph]:
         """Generate OWL using rdflib."""
         g = Graph()
+        gen_ns_manager = self._get_generation_namespace_manager(ontology)
 
         # Set up namespaces
         ns_manager = RDFNamespaceManager(g)
@@ -191,6 +226,8 @@ class OWLGenerator:
 
         # Register ontology namespace
         base_uri = ontology.get("uri") or self.namespace_manager.get_base_uri()
+        if isinstance(base_uri, str) and not base_uri.endswith(("/", "#")):
+            base_uri = base_uri + "/"
         ont_ns = Namespace(base_uri)
         g.bind("", ont_ns)
 
@@ -207,10 +244,10 @@ class OWLGenerator:
         # Add classes
         classes = ontology.get("classes", [])
         for cls in classes:
-            class_name = cls.get("name") or cls.get("label")
+            class_name = self._resolve_class_identifier(cls)
             class_uri = URIRef(
                 cls.get("uri")
-                or self.namespace_manager.generate_class_iri(class_name)
+                or gen_ns_manager.generate_class_iri(class_name)
             )
             g.add((class_uri, RDF.type, OWL.Class))
 
@@ -223,7 +260,7 @@ class OWLGenerator:
             # Add subclass relationships
             subclass_of = cls.get("subClassOf") or cls.get("subclassOf")
             if subclass_of:
-                parent_uri = URIRef(subclass_of)
+                parent_uri = URIRef(self._resolve_class_uri(subclass_of, gen_ns_manager))
                 g.add((class_uri, RDFS.subClassOf, parent_uri))
 
         # Add object properties
@@ -232,8 +269,8 @@ class OWLGenerator:
             if prop.get("type") == "object":
                 prop_uri = URIRef(
                     prop.get("uri")
-                    or self.namespace_manager.generate_property_iri(
-                        prop.get("name") or prop.get("label")
+                    or gen_ns_manager.generate_property_iri(
+                        self._resolve_property_identifier(prop)
                     )
                 )
                 g.add((prop_uri, RDF.type, OWL.ObjectProperty))
@@ -245,28 +282,20 @@ class OWLGenerator:
                 # Add domain
                 domains = self._as_list(prop.get("domain", []))
                 for domain in domains:
-                    domain_uri = URIRef(
-                        domain
-                        if domain.startswith("http")
-                        else self.namespace_manager.generate_class_iri(domain)
-                    )
+                    domain_uri = URIRef(self._resolve_class_uri(domain, gen_ns_manager))
                     g.add((prop_uri, RDFS.domain, domain_uri))
 
                 # Add range
                 ranges = self._as_list(prop.get("range", []))
                 for range_val in ranges:
-                    range_uri = URIRef(
-                        range_val
-                        if range_val.startswith("http")
-                        else self.namespace_manager.generate_class_iri(range_val)
-                    )
+                    range_uri = URIRef(self._resolve_class_uri(range_val, gen_ns_manager))
                     g.add((prop_uri, RDFS.range, range_uri))
 
             elif self._is_datatype_property(prop.get("type")):
                 prop_uri = URIRef(
                     prop.get("uri")
-                    or self.namespace_manager.generate_property_iri(
-                        prop.get("name") or prop.get("label")
+                    or gen_ns_manager.generate_property_iri(
+                        self._resolve_property_identifier(prop)
                     )
                 )
                 g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
@@ -278,20 +307,14 @@ class OWLGenerator:
                 # Add domain
                 domains = self._as_list(prop.get("domain", []))
                 for domain in domains:
-                    domain_uri = URIRef(
-                        domain
-                        if domain.startswith("http")
-                        else self.namespace_manager.generate_class_iri(domain)
-                    )
+                    domain_uri = URIRef(self._resolve_class_uri(domain, gen_ns_manager))
                     g.add((prop_uri, RDFS.domain, domain_uri))
 
                 # Add range
-                range_type = prop.get("range", "xsd:string")
-                if range_type.startswith("xsd:"):
-                    range_uri = XSD[range_type.replace("xsd:", "")]
-                else:
-                    range_uri = URIRef(range_type)
-                g.add((prop_uri, RDFS.range, range_uri))
+                range_values = self._as_list(prop.get("range", "xsd:string"))
+                for range_val in range_values:
+                    range_uri = self._resolve_datatype_range_uri(range_val, gen_ns_manager)
+                    g.add((prop_uri, RDFS.range, range_uri))
 
         # Serialize
         if format == "turtle":
@@ -310,9 +333,12 @@ class OWLGenerator:
     ) -> str:
         """Generate OWL using basic string formatting (fallback)."""
         lines = []
+        gen_ns_manager = self._get_generation_namespace_manager(ontology)
 
         # Namespace declarations
         base_uri = ontology.get("uri") or self.namespace_manager.get_base_uri()
+        if isinstance(base_uri, str) and not base_uri.endswith(("/", "#")):
+            base_uri = base_uri + "/"
         lines.append(f"@prefix : <{base_uri}> .")
         lines.append("@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .")
         lines.append("@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .")
@@ -331,8 +357,8 @@ class OWLGenerator:
         # Classes
         classes = ontology.get("classes", [])
         for cls in classes:
-            class_name = cls.get("name") or cls.get("label")
-            class_uri = cls.get("uri") or self.namespace_manager.generate_class_iri(
+            class_name = self._resolve_class_identifier(cls)
+            class_uri = cls.get("uri") or gen_ns_manager.generate_class_iri(
                 class_name
             )
             lines.append(f"<{class_uri}> a owl:Class ;")
@@ -343,7 +369,7 @@ class OWLGenerator:
                 lines.append(f'    rdfs:comment "{cls["comment"]}" ;')
             subclass_of = cls.get("subClassOf") or cls.get("subclassOf")
             if subclass_of:
-                parent_uri = subclass_of
+                parent_uri = self._resolve_class_uri(subclass_of, gen_ns_manager)
                 lines.append(f"    rdfs:subClassOf <{parent_uri}> .")
             else:
                 lines[-1] = lines[-1].rstrip(" ;") + " ."
@@ -352,8 +378,8 @@ class OWLGenerator:
         # Properties
         properties = ontology.get("properties", [])
         for prop in properties:
-            prop_uri = prop.get("uri") or self.namespace_manager.generate_property_iri(
-                prop.get("name") or prop.get("label")
+            prop_uri = prop.get("uri") or gen_ns_manager.generate_property_iri(
+                self._resolve_property_identifier(prop)
             )
             prop_type = (
                 "owl:ObjectProperty"
@@ -368,28 +394,18 @@ class OWLGenerator:
             # Domain
             domains = self._as_list(prop.get("domain", []))
             for domain in domains:
-                domain_uri = (
-                    domain
-                    if domain.startswith("http")
-                    else self.namespace_manager.generate_class_iri(domain)
-                )
+                domain_uri = self._resolve_class_uri(domain, gen_ns_manager)
                 lines.append(f"    rdfs:domain <{domain_uri}> ;")
 
             # Range
             ranges = self._as_list(prop.get("range", []))
             for range_val in ranges:
-                if self._is_datatype_property(prop.get("type")) and range_val.startswith(
-                    "xsd:"
-                ):
-                    lines.append(
-                        f"    rdfs:range {range_val.replace('xsd:', 'xsd:')} ;"
-                    )
+                if self._is_datatype_property(prop.get("type")) and isinstance(
+                    range_val, str
+                ) and range_val.startswith("xsd:"):
+                    lines.append(f"    rdfs:range {range_val} ;")
                 else:
-                    range_uri = (
-                        range_val
-                        if range_val.startswith("http")
-                        else self.namespace_manager.generate_class_iri(range_val)
-                    )
+                    range_uri = self._resolve_class_uri(range_val, gen_ns_manager)
                     lines.append(f"    rdfs:range <{range_uri}> ;")
 
             lines[-1] = lines[-1].rstrip(" ;") + " ."

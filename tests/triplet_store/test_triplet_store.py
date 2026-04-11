@@ -601,3 +601,78 @@ class TestTripletStoreOntologyNamespace(unittest.TestCase):
         subjects = {t.subject for t in captured}
         self.assertIn("https://example.com/alice", subjects)
         self.assertNotIn("https://example.com//alice", subjects)
+
+    # --- Bug: non-string IDs crash store ---
+
+    def test_integer_entity_id_does_not_crash(self, mock_bg):
+        """Integer entity IDs must be coerced to str, not crash with AttributeError."""
+        store, captured = self._make_store(mock_bg)
+        kg = {
+            "entities": [
+                {"id": 1, "type": "Person"},
+                {"id": 2, "type": "Person"},
+            ],
+            "relationships": [{"source": 1, "target": 2, "type": "knows"}],
+        }
+        store.store(kg, self._ontology())
+        subjects = {t.subject for t in captured}
+        self.assertIn(f"{self.BASE}1", subjects)
+        self.assertIn(f"{self.BASE}2", subjects)
+        predicates = {t.predicate for t in captured}
+        self.assertIn(f"{self.BASE}knows", predicates)
+
+    def test_integer_entity_id_fallback_to_urn(self, mock_bg):
+        """Integer IDs fall back to urn: when no base_uri is set."""
+        store, captured = self._make_store(mock_bg)
+        kg = {"entities": [{"id": 42, "type": "Person"}], "relationships": []}
+        ontology = {"classes": [], "properties": []}
+        store.store(kg, ontology)
+        subjects = {t.subject for t in captured}
+        self.assertIn("urn:entity:42", subjects)
+
+    # --- Bug: prefixed W3C terms mis-resolved under base_uri ---
+
+    def test_owl_thing_domain_not_rewritten_under_base_uri(self, mock_bg):
+        """owl:Thing in domain/range must expand to the W3C OWL IRI, not base_uri + 'owl:Thing'."""
+        store, captured = self._make_store(mock_bg)
+        ontology = {
+            "namespace": {"base_uri": self.BASE},
+            "classes": [],
+            "properties": [{"name": "hasThing", "domain": ["owl:Thing"], "range": ["owl:Thing"]}],
+        }
+        store.store({"entities": [], "relationships": []}, ontology)
+        RDFS_DOMAIN = "http://www.w3.org/2000/01/rdf-schema#domain"
+        RDFS_RANGE = "http://www.w3.org/2000/01/rdf-schema#range"
+        domain_objects = {t.object for t in captured if t.predicate == RDFS_DOMAIN}
+        range_objects = {t.object for t in captured if t.predicate == RDFS_RANGE}
+        self.assertIn("http://www.w3.org/2002/07/owl#Thing", domain_objects)
+        self.assertNotIn(f"{self.BASE}owl:Thing", domain_objects)
+        self.assertIn("http://www.w3.org/2002/07/owl#Thing", range_objects)
+
+    def test_xsd_date_range_not_rewritten_under_base_uri(self, mock_bg):
+        """xsd:date in range must expand to the W3C XSD IRI, not base_uri + 'xsd:date'."""
+        store, captured = self._make_store(mock_bg)
+        ontology = {
+            "namespace": {"base_uri": self.BASE},
+            "classes": [],
+            "properties": [{"name": "birthDate", "range": ["xsd:date"]}],
+        }
+        store.store({"entities": [], "relationships": []}, ontology)
+        RDFS_RANGE = "http://www.w3.org/2000/01/rdf-schema#range"
+        range_objects = {t.object for t in captured if t.predicate == RDFS_RANGE}
+        self.assertIn("http://www.w3.org/2001/XMLSchema#date", range_objects)
+        self.assertNotIn(f"{self.BASE}xsd:date", range_objects)
+
+    def test_rdfs_and_skos_prefixes_expanded_correctly(self, mock_bg):
+        """rdfs: and skos: prefixes in class URIs and parent links expand to W3C IRIs."""
+        store, captured = self._make_store(mock_bg)
+        ontology = {
+            "namespace": {"base_uri": self.BASE},
+            "classes": [{"name": "Concept", "parent": "skos:Concept"}],
+            "properties": [],
+        }
+        store.store({"entities": [], "relationships": []}, ontology)
+        RDFS_SUBCLASS = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
+        parent_objects = {t.object for t in captured if t.predicate == RDFS_SUBCLASS}
+        self.assertIn("http://www.w3.org/2004/02/skos/core#Concept", parent_objects)
+        self.assertNotIn(f"{self.BASE}skos:Concept", parent_objects)

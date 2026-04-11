@@ -181,15 +181,40 @@ class TripletStore:
         if base_uri and not base_uri.endswith(("/", "#")):
             base_uri = base_uri + "/"
 
-        def _resolve_iri(local: str, kind: str) -> str:
+        # Known W3C vocabulary prefixes — expanded before base_uri is applied so
+        # values like "owl:Thing" or "xsd:date" are never re-namespaced under
+        # the ontology's own base URI.
+        _KNOWN_PREFIXES = {
+            "xsd":      "http://www.w3.org/2001/XMLSchema#",
+            "rdf":      "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+            "rdfs":     "http://www.w3.org/2000/01/rdf-schema#",
+            "owl":      "http://www.w3.org/2002/07/owl#",
+            "skos":     "http://www.w3.org/2004/02/skos/core#",
+            "semantica": "https://semantica.dev/ontology/",
+        }
+
+        def _resolve_iri(local: object, kind: str) -> str:
             """Expand a bare local name to a full IRI.
 
-            If *base_uri* is available the local name is appended to it so the
-            resulting IRI sits in the same namespace as the ontology classes.
-            Falls back to ``urn:<kind>:<local>`` only when no base URI is known.
+            Accepts any type for *local* — non-strings are coerced via str()
+            so integer/numeric IDs passed from graph builders do not crash.
+
+            Resolution order:
+            1. Already an absolute IRI (http / https / urn:) → return as-is.
+            2. Known vocabulary prefix (xsd:, rdf:, rdfs:, owl:, skos:,
+               semantica:) → expand to the canonical W3C IRI.
+            3. base_uri is set → append local name to base_uri.
+            4. Fallback → ``urn:<kind>:<local>``.
             """
-            if local.startswith("http") or local.startswith("urn:"):
+            local = str(local) if local is not None else ""
+            if not local:
+                return f"urn:{kind}:unknown"
+            if local.startswith(("http://", "https://", "urn:")):
                 return local
+            if ":" in local:
+                prefix, name = local.split(":", 1)
+                if prefix in _KNOWN_PREFIXES:
+                    return f"{_KNOWN_PREFIXES[prefix]}{name}"
             if base_uri:
                 return f"{base_uri}{local}"
             return f"urn:{kind}:{local}"

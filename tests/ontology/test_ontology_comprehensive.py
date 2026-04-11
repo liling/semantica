@@ -165,6 +165,36 @@ class TestOntologyComprehensive(unittest.TestCase):
         self.assertIn("Person", owl_output)
         self.assertIn("hasName", owl_output)
 
+    def test_owl_generator_user_facing_schema_compatibility(self):
+        try:
+            from semantica.ontology.owl_generator import OWLGenerator
+        except ImportError:
+            self.skipTest("OWLGenerator not importable")
+
+        generator = OWLGenerator()
+        ontology = {
+            "name": "UserFacingOntology",
+            "uri": "http://example.org/ontology/",
+            "classes": [
+                {"name": "Person", "subclassOf": "http://example.org/ontology/Agent"},
+            ],
+            "properties": [
+                {
+                    "name": "birthDate",
+                    "type": "datatype",
+                    "domain": "Person",
+                    "range": "xsd:date",
+                }
+            ],
+        }
+
+        owl_output = generator.generate_owl(ontology, format="turtle")
+
+        self.assertIn("owl:DatatypeProperty", owl_output)
+        self.assertIn("rdfs:subClassOf", owl_output)
+        self.assertIn("birthDate", owl_output)
+        self.assertIn("xsd:date", owl_output)
+
     # --- OntologyValidator Tests ---
     # Removed as per request
         

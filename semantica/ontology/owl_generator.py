@@ -156,6 +156,24 @@ class OWLGenerator:
             )
             raise
 
+    @staticmethod
+    def _as_list(value: Any) -> List[Any]:
+        """Normalize scalar-or-list ontology values to a list."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    @staticmethod
+    def _is_datatype_property(prop_type: Any) -> bool:
+        """Return True for supported datatype property aliases."""
+        return str(prop_type or "").strip().lower() in {
+            "datatype",
+            "data",
+            "datatypeproperty",
+        }
+
     def _generate_with_rdflib(
         self, ontology: Dict[str, Any], format: str = "turtle", **options
     ) -> Union[str, Graph]:
@@ -189,19 +207,23 @@ class OWLGenerator:
         # Add classes
         classes = ontology.get("classes", [])
         for cls in classes:
+            class_name = cls.get("name") or cls.get("label")
             class_uri = URIRef(
-                cls.get("uri") or self.namespace_manager.generate_class_iri(cls["name"])
+                cls.get("uri")
+                or self.namespace_manager.generate_class_iri(class_name)
             )
             g.add((class_uri, RDF.type, OWL.Class))
 
-            if cls.get("label"):
-                g.add((class_uri, RDFS.label, Literal(cls["label"])))
+            class_label = cls.get("label") or cls.get("name")
+            if class_label:
+                g.add((class_uri, RDFS.label, Literal(class_label)))
             if cls.get("comment"):
                 g.add((class_uri, RDFS.comment, Literal(cls["comment"])))
 
             # Add subclass relationships
-            if cls.get("subClassOf"):
-                parent_uri = URIRef(cls["subClassOf"])
+            subclass_of = cls.get("subClassOf") or cls.get("subclassOf")
+            if subclass_of:
+                parent_uri = URIRef(subclass_of)
                 g.add((class_uri, RDFS.subClassOf, parent_uri))
 
         # Add object properties
@@ -210,15 +232,18 @@ class OWLGenerator:
             if prop.get("type") == "object":
                 prop_uri = URIRef(
                     prop.get("uri")
-                    or self.namespace_manager.generate_property_iri(prop["name"])
+                    or self.namespace_manager.generate_property_iri(
+                        prop.get("name") or prop.get("label")
+                    )
                 )
                 g.add((prop_uri, RDF.type, OWL.ObjectProperty))
 
-                if prop.get("label"):
-                    g.add((prop_uri, RDFS.label, Literal(prop["label"])))
+                prop_label = prop.get("label") or prop.get("name")
+                if prop_label:
+                    g.add((prop_uri, RDFS.label, Literal(prop_label)))
 
                 # Add domain
-                domains = prop.get("domain", [])
+                domains = self._as_list(prop.get("domain", []))
                 for domain in domains:
                     domain_uri = URIRef(
                         domain
@@ -228,7 +253,7 @@ class OWLGenerator:
                     g.add((prop_uri, RDFS.domain, domain_uri))
 
                 # Add range
-                ranges = prop.get("range", [])
+                ranges = self._as_list(prop.get("range", []))
                 for range_val in ranges:
                     range_uri = URIRef(
                         range_val
@@ -237,18 +262,21 @@ class OWLGenerator:
                     )
                     g.add((prop_uri, RDFS.range, range_uri))
 
-            elif prop.get("type") == "data":
+            elif self._is_datatype_property(prop.get("type")):
                 prop_uri = URIRef(
                     prop.get("uri")
-                    or self.namespace_manager.generate_property_iri(prop["name"])
+                    or self.namespace_manager.generate_property_iri(
+                        prop.get("name") or prop.get("label")
+                    )
                 )
                 g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
 
-                if prop.get("label"):
-                    g.add((prop_uri, RDFS.label, Literal(prop["label"])))
+                prop_label = prop.get("label") or prop.get("name")
+                if prop_label:
+                    g.add((prop_uri, RDFS.label, Literal(prop_label)))
 
                 # Add domain
-                domains = prop.get("domain", [])
+                domains = self._as_list(prop.get("domain", []))
                 for domain in domains:
                     domain_uri = URIRef(
                         domain
@@ -303,16 +331,19 @@ class OWLGenerator:
         # Classes
         classes = ontology.get("classes", [])
         for cls in classes:
+            class_name = cls.get("name") or cls.get("label")
             class_uri = cls.get("uri") or self.namespace_manager.generate_class_iri(
-                cls["name"]
+                class_name
             )
             lines.append(f"<{class_uri}> a owl:Class ;")
-            if cls.get("label"):
-                lines.append(f'    rdfs:label "{cls["label"]}" ;')
+            class_label = cls.get("label") or cls.get("name")
+            if class_label:
+                lines.append(f'    rdfs:label "{class_label}" ;')
             if cls.get("comment"):
                 lines.append(f'    rdfs:comment "{cls["comment"]}" ;')
-            if cls.get("subClassOf"):
-                parent_uri = cls["subClassOf"]
+            subclass_of = cls.get("subClassOf") or cls.get("subclassOf")
+            if subclass_of:
+                parent_uri = subclass_of
                 lines.append(f"    rdfs:subClassOf <{parent_uri}> .")
             else:
                 lines[-1] = lines[-1].rstrip(" ;") + " ."
@@ -322,7 +353,7 @@ class OWLGenerator:
         properties = ontology.get("properties", [])
         for prop in properties:
             prop_uri = prop.get("uri") or self.namespace_manager.generate_property_iri(
-                prop["name"]
+                prop.get("name") or prop.get("label")
             )
             prop_type = (
                 "owl:ObjectProperty"
@@ -330,11 +361,12 @@ class OWLGenerator:
                 else "owl:DatatypeProperty"
             )
             lines.append(f"<{prop_uri}> a {prop_type} ;")
-            if prop.get("label"):
-                lines.append(f'    rdfs:label "{prop["label"]}" ;')
+            prop_label = prop.get("label") or prop.get("name")
+            if prop_label:
+                lines.append(f'    rdfs:label "{prop_label}" ;')
 
             # Domain
-            domains = prop.get("domain", [])
+            domains = self._as_list(prop.get("domain", []))
             for domain in domains:
                 domain_uri = (
                     domain
@@ -344,9 +376,11 @@ class OWLGenerator:
                 lines.append(f"    rdfs:domain <{domain_uri}> ;")
 
             # Range
-            ranges = prop.get("range", [])
+            ranges = self._as_list(prop.get("range", []))
             for range_val in ranges:
-                if prop.get("type") == "data" and range_val.startswith("xsd:"):
+                if self._is_datatype_property(prop.get("type")) and range_val.startswith(
+                    "xsd:"
+                ):
                     lines.append(
                         f"    rdfs:range {range_val.replace('xsd:', 'xsd:')} ;"
                     )

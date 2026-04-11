@@ -482,3 +482,122 @@ class TestSKOSTripletStore(unittest.TestCase):
             return_value=QueryResult(bindings=[], variables=[])
         )
         self.assertEqual(store.get_skos_concepts(), [])
+
+
+@patch("semantica.triplet_store.blazegraph_store.BlazegraphStore")
+class TestTripletStoreOntologyNamespace(unittest.TestCase):
+    """Regression tests for Issue #447 — store() must use ontology namespace base_uri."""
+
+    BASE = "https://example.com/"
+
+    def _make_store(self, mock_bg):
+        """Return (store, captured_triplets_list).
+
+        add_triplets is patched so store() never touches the bulk_loader or
+        backend; instead every Triplet passed to it is appended to the list.
+        """
+        captured = []
+
+        def _capture(triplets, **_kw):
+            captured.extend(triplets)
+            return {"success": True}
+
+        with (
+            patch("semantica.triplet_store.triplet_store.get_logger", return_value=MagicMock()),
+            patch("semantica.triplet_store.triplet_store.get_progress_tracker", return_value=MagicMock()),
+        ):
+            store = TripletStore(backend="blazegraph")
+        store.add_triplets = _capture
+        return store, captured
+
+    def _ontology(self):
+        return {
+            "namespace": {"base_uri": self.BASE},
+            "classes": [{"name": "Person"}],
+            "properties": [{"name": "knows", "domain": ["Person"], "range": ["Person"]}],
+        }
+
+    def _kg(self):
+        return {
+            "entities": [
+                {"id": "alice", "type": "Person"},
+                {"id": "bob", "type": "Person"},
+            ],
+            "relationships": [{"source": "alice", "target": "bob", "type": "knows"}],
+        }
+
+    def test_entity_uri_uses_base_uri(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        store.store(self._kg(), self._ontology())
+        subjects = {t.subject for t in captured}
+        self.assertIn(f"{self.BASE}alice", subjects)
+        self.assertIn(f"{self.BASE}bob", subjects)
+        self.assertNotIn("urn:entity:alice", subjects)
+
+    def test_entity_type_uses_base_uri(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        store.store(self._kg(), self._ontology())
+        RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+        type_objects = {t.object for t in captured if t.predicate == RDF_TYPE}
+        self.assertIn(f"{self.BASE}Person", type_objects)
+        self.assertNotIn("urn:class:Person", type_objects)
+
+    def test_relationship_type_uses_base_uri(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        store.store(self._kg(), self._ontology())
+        predicates = {t.predicate for t in captured}
+        self.assertIn(f"{self.BASE}knows", predicates)
+        self.assertNotIn("urn:property:knows", predicates)
+
+    def test_ontology_class_uri_uses_base_uri(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        store.store(self._kg(), self._ontology())
+        OWL_CLASS = "http://www.w3.org/2002/07/owl#Class"
+        class_subjects = {t.subject for t in captured if t.object == OWL_CLASS}
+        self.assertIn(f"{self.BASE}Person", class_subjects)
+
+    def test_ontology_property_domain_range_use_base_uri(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        store.store(self._kg(), self._ontology())
+        RDFS_DOMAIN = "http://www.w3.org/2000/01/rdf-schema#domain"
+        RDFS_RANGE = "http://www.w3.org/2000/01/rdf-schema#range"
+        domain_objects = {t.object for t in captured if t.predicate == RDFS_DOMAIN}
+        range_objects = {t.object for t in captured if t.predicate == RDFS_RANGE}
+        self.assertIn(f"{self.BASE}Person", domain_objects)
+        self.assertIn(f"{self.BASE}Person", range_objects)
+
+    def test_explicit_entity_uri_not_overridden(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        kg = {"entities": [{"id": "alice", "uri": "https://other.org/Alice", "type": "Person"}], "relationships": []}
+        store.store(kg, self._ontology())
+        subjects = {t.subject for t in captured}
+        self.assertIn("https://other.org/Alice", subjects)
+        self.assertNotIn(f"{self.BASE}alice", subjects)
+
+    def test_no_base_uri_falls_back_to_urn(self, mock_bg):
+        store, captured = self._make_store(mock_bg)
+        kg = {"entities": [{"id": "alice", "type": "Person"}], "relationships": []}
+        ontology = {"classes": [{"name": "Person"}], "properties": []}
+        store.store(kg, ontology)
+        subjects = {t.subject for t in captured}
+        self.assertIn("urn:entity:alice", subjects)
+
+    def test_base_uri_via_top_level_uri_key(self, mock_bg):
+        """ontology['uri'] should work as a fallback when namespace dict is absent."""
+        store, captured = self._make_store(mock_bg)
+        ontology = {"uri": self.BASE, "classes": [{"name": "Person"}], "properties": []}
+        kg = {"entities": [{"id": "alice", "type": "Person"}], "relationships": []}
+        store.store(kg, ontology)
+        subjects = {t.subject for t in captured}
+        self.assertIn(f"{self.BASE}alice", subjects)
+
+    def test_trailing_slash_not_doubled(self, mock_bg):
+        """base_uri already ending with '/' must not produce 'base//local'."""
+        store, captured = self._make_store(mock_bg)
+        ontology = {"namespace": {"base_uri": "https://example.com/"}, "classes": [], "properties": []}
+        # Give alice a type so a triplet is emitted with alice as subject
+        kg = {"entities": [{"id": "alice", "type": "Person"}], "relationships": []}
+        store.store(kg, ontology)
+        subjects = {t.subject for t in captured}
+        self.assertIn("https://example.com/alice", subjects)
+        self.assertNotIn("https://example.com//alice", subjects)

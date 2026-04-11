@@ -15,6 +15,16 @@ from ..session import GraphSession
 
 router = APIRouter(prefix="/api/sparql", tags=["Power User Tools"])
 
+_ALLOWED_QUERY_TYPES = re.compile(
+    r"^\s*(SELECT|ASK|CONSTRUCT|DESCRIBE)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_read_only_query(query: str) -> bool:
+    """Return True only for SELECT / ASK / CONSTRUCT / DESCRIBE queries."""
+    return bool(_ALLOWED_QUERY_TYPES.match(query))
+
 
 class SparqlRequest(BaseModel):
     query: str
@@ -69,6 +79,14 @@ async def execute_sparql(
     req: SparqlRequest,
     session: GraphSession = Depends(get_session),
 ):
+    if not _is_read_only_query(req.query):
+        return SparqlResponse(
+            columns=[],
+            rows=[],
+            total=0,
+            error="Only SELECT, ASK, CONSTRUCT, and DESCRIBE queries are permitted.",
+        )
+
     graph = await asyncio.to_thread(_build_rdflib_graph, session)
     try:
         query_results = await asyncio.to_thread(graph.query, req.query)

@@ -6,7 +6,7 @@ import asyncio
 from collections import defaultdict
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 
 from ..dependencies import get_session
 from ..schemas import ConceptNode, ConceptSummary, VocabularyImportResponse, VocabularyScheme
@@ -14,6 +14,8 @@ from ..session import GraphSession
 from ..utils.rdf_parser import parse_skos_file
 
 router = APIRouter(prefix="/api/vocabulary", tags=["Vocabulary"])
+
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _concept_summary(node: dict, scheme_uri: Optional[str] = None, parent_uri: Optional[str] = None) -> ConceptSummary:
@@ -179,12 +181,32 @@ async def import_vocabulary(
         raise HTTPException(status_code=422, detail="Provide either a vocabulary file or raw RDF text.")
 
     filename = file.filename if file else None
-    content = await file.read() if file else text.encode("utf-8")
+    if file is not None:
+        content = await file.read()
+        if len(content) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+            )
+    else:
+        encoded = text.encode("utf-8")
+        if len(encoded) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Text payload exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+            )
+        content = encoded
 
     parse_format = (format or "").strip().lower() or None
     if parse_format is None:
-        if filename and filename.lower().endswith((".rdf", ".owl", ".xml")):
-            parse_format = "xml"
+        if filename:
+            lower_name = filename.lower()
+            if lower_name.endswith((".rdf", ".owl", ".xml")):
+                parse_format = "xml"
+            elif lower_name.endswith((".jsonld", ".json-ld", ".json")):
+                parse_format = "json-ld"
+            else:
+                parse_format = "turtle"
         else:
             parse_format = "turtle"
 

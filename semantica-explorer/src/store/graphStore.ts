@@ -142,6 +142,7 @@ export function batchMergeEdges(
   const touchedPairs = new Map<string, { source: string; target: string }>();
 
   for (const { id, familyId, source, target, attributes } of edges) {
+    if (source === target) continue; // skip self-loops; graph was created with allowSelfLoops: false
     const edgeId = String(attributes.edgeId || id);
     const resolvedFamilyId = String(attributes.familyId || familyId || edgeId);
 

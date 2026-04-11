@@ -515,6 +515,10 @@ class GraphSession:
             self.annotations[ann_id] = annotation
         return ann_id
 
+    def get_annotation(self, annotation_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            return self.annotations.get(annotation_id)
+
     def get_annotations(self, node_id: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._lock:
             anns = list(self.annotations.values())

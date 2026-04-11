@@ -54,7 +54,7 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    cors_origins = os.environ.get("EXPLORER_CORS_ORIGINS", "*")
+    cors_origins = os.environ.get("EXPLORER_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins.split(","),
@@ -140,3 +140,7 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Frontend build missing")
 
     return app
+
+
+# Module-level app instance used by uvicorn and Docker CMD.
+app = create_app()

@@ -26,4 +26,4 @@ RUN pip install --no-cache-dir ".[explorer]"
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "semantica.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "semantica.explorer.app:app", "--host", "0.0.0.0", "--port", "8000"]

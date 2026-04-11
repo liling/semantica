@@ -23,4 +23,9 @@ def get_session(request: Request) -> GraphSession:
 
 def get_ws_manager(request: Request) -> ConnectionManager:
     """Retrieve the ConnectionManager stored on ``app.state``."""
+    if not hasattr(request.app.state, "ws_manager") or request.app.state.ws_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WebSocket manager not initialized.",
+        )
     return request.app.state.ws_manager

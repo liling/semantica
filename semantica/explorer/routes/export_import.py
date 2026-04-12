@@ -17,6 +17,9 @@ from ..session import GraphSession
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Export / Import"])
 
+_IMPORT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+_ALLOWED_IMPORT_EXTENSIONS = frozenset({".json", ".csv", ".graphml", ".gexf", ".ttl", ".rdf"})
+
 
 def _import_response(nodes_added: int, edges_added: int, message: str = "Import successful") -> ImportResponse:
     return ImportResponse(
@@ -34,8 +37,21 @@ async def import_file(
     file: UploadFile = File(...),
     session: GraphSession = Depends(get_session),
 ):
-    content = await file.read()
+    import os as _os
     filename = (file.filename or "").lower()
+    ext = _os.path.splitext(filename)[1]
+    if ext not in _ALLOWED_IMPORT_EXTENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type '{ext}'. Allowed: {sorted(_ALLOWED_IMPORT_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    if len(content) > _IMPORT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds the {_IMPORT_MAX_BYTES // (1024 * 1024)} MB limit.",
+        )
 
     if filename.endswith(".json"):
         try:

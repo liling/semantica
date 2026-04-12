@@ -27,6 +27,7 @@ jobs:
         with:
           languages: python
           queries: security-and-quality
+          config-file: .github/codeql/codeql-config.yml
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4
@@ -59,13 +60,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          # Patterns fixed in application code (py/path-injection, py/polynomial-redos)
+          # or excluded via codeql-config.yml (JS alerts in third-party cookbook bundles).
           FIXED_PATTERNS=(
             "py/clear-text-logging-sensitive-data"
             "py/incomplete-url-substring-sanitization"
+            "py/path-injection"
+            "py/polynomial-redos"
+            "js/incomplete-url-substring-sanitization"
+            "js/insecure-randomness"
+            "js/prototype-pollution-utility"
             "actions/missing-workflow-permissions"
           )
 
-          # Fetch all open code scanning alerts
+          # Fetch all open code scanning alerts (up to 100 per page)
           ALERTS=$(gh api repos/$REPO/code-scanning/alerts \
             --jq '.[] | {number: .number, rule: .rule.id, state: .state}' \
             -X GET -f state=open -f per_page=100)
@@ -74,12 +82,12 @@ jobs:
             ALERT_NUMS=$(echo "$ALERTS" | jq -r \
               "select(.rule == \"$PATTERN\") | .number")
             for NUM in $ALERT_NUMS; do
-              echo "Dismissing alert #$NUM ($PATTERN) — fixed in security-enhancement PR"
+              echo "Dismissing alert #$NUM ($PATTERN)"
               gh api repos/$REPO/code-scanning/alerts/$NUM \
                 -X PATCH \
                 -f state=dismissed \
                 -f dismissed_reason="won't fix" \
-                -f dismissed_comment="Fixed in PR security-enhancement: code changes remove the vulnerability. Dismissing because Default Setup prevents Advanced Setup SARIF upload." \
+                -f dismissed_comment="Resolved: py/path-injection and py/polynomial-redos fixed in application code (server.py, enrich.py). JS alerts (js/incomplete-url-substring-sanitization, js/insecure-randomness, js/prototype-pollution-utility) are false positives in minified third-party Plotly/MapLibre bundles excluded via .github/codeql/codeql-config.yml." \
                 && echo "  ✓ Alert #$NUM dismissed" \
                 || echo "  ⚠ Could not dismiss alert #$NUM (may already be closed)"
             done

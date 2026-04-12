@@ -16,6 +16,7 @@ from ..utils.rdf_parser import parse_skos_file
 router = APIRouter(prefix="/api/vocabulary", tags=["Vocabulary"])
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+_ALLOWED_EXTENSIONS = frozenset({".ttl", ".rdf", ".owl", ".xml", ".jsonld", ".json-ld", ".json"})
 
 
 def _concept_summary(node: dict, scheme_uri: Optional[str] = None, parent_uri: Optional[str] = None) -> ConceptSummary:
@@ -182,6 +183,14 @@ async def import_vocabulary(
 
     filename = file.filename if file else None
     if file is not None:
+        if filename:
+            import os as _os
+            ext = _os.path.splitext(filename.lower())[1]
+            if ext not in _ALLOWED_EXTENSIONS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unsupported file type '{ext}'. Allowed: {sorted(_ALLOWED_EXTENSIONS)}",
+                )
         content = await file.read()
         if len(content) > _MAX_UPLOAD_BYTES:
             raise HTTPException(

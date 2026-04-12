@@ -3,6 +3,7 @@ Graph routes for explorer node, edge, path, and search APIs.
 """
 
 import asyncio
+from enum import Enum
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -135,11 +136,16 @@ async def list_edges(
     )
 
 
+class _PathAlgorithm(str, Enum):
+    bfs = "bfs"
+    dijkstra = "dijkstra"
+
+
 @router.get("/node/{node_id}/path", response_model=PathResponse)
 async def find_path(
     node_id: str,
     target: str = Query(..., description="Target node ID"),
-    algorithm: str = Query("bfs", description="Algorithm: bfs or dijkstra"),
+    algorithm: _PathAlgorithm = Query(_PathAlgorithm.bfs, description="Algorithm: bfs or dijkstra"),
     session: GraphSession = Depends(get_session),
 ):
     path_finder = session.path_finder
@@ -149,7 +155,7 @@ async def find_path(
     graph_dict = await asyncio.to_thread(session.build_graph_dict)
     path_fn = (
         path_finder.dijkstra_shortest_path
-        if algorithm.lower() == "dijkstra"
+        if algorithm == _PathAlgorithm.dijkstra
         else path_finder.bfs_shortest_path
     )
     result = await asyncio.to_thread(path_fn, graph_dict, node_id, target)
@@ -161,7 +167,7 @@ async def find_path(
     return PathResponse(
         source=node_id,
         target=target,
-        algorithm=algorithm,
+        algorithm=algorithm.value,
         path=path_nodes,
         edge_ids=edge_ids,
         total_weight=total_weight,

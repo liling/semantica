@@ -9,6 +9,31 @@ from typing import Any, Dict, List, Tuple
 import rdflib
 from rdflib.namespace import RDF, RDFS, SKOS
 
+try:
+    import defusedxml.ElementTree as _defused_et  # noqa: F401 — import triggers patching
+    _HAS_DEFUSEDXML = True
+except ImportError:
+    _HAS_DEFUSEDXML = False
+
+
+def _safe_parse_rdf(g: rdflib.Graph, data: bytes, rdf_format: str) -> None:
+    """Parse RDF bytes into *g*, guarding against XXE for XML-based formats."""
+    xml_formats = {"xml", "rdf", "rdf/xml", "application/rdf+xml"}
+    if rdf_format.lower() in xml_formats:
+        if _HAS_DEFUSEDXML:
+            # defusedxml patches xml.etree so rdflib's XML parser inherits the fix
+            import defusedxml
+            defusedxml.defuse_stdlib()
+        else:
+            # Warn once; best-effort protection via rdflib's own parser
+            import warnings
+            warnings.warn(
+                "defusedxml is not installed. Install it (`pip install defusedxml`) "
+                "to protect RDF/XML parsing against XXE attacks.",
+                stacklevel=4,
+            )
+    g.parse(data=data, format=rdf_format)
+
 def _get_best_label(graph: rdflib.Graph, subject: rdflib.URIRef, predicate: rdflib.URIRef) -> str:
     """
     Extracts the best available string label for a given predicate.
@@ -63,7 +88,7 @@ def parse_skos_file(file_bytes: bytes, rdf_format: str = "turtle") -> Tuple[List
     g = rdflib.Graph()
 
     try:
-        g.parse(data=file_bytes, format=rdf_format)
+        _safe_parse_rdf(g, file_bytes, rdf_format)
     except Exception as e:
         raise ValueError(f"Failed to parse RDF file as {rdf_format}. Ensure the file is valid. Details: {str(e)}") from e
     

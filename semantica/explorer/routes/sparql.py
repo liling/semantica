@@ -74,6 +74,10 @@ def _build_rdflib_graph(session: GraphSession) -> rdflib.Graph:
     return graph
 
 
+_SPARQL_MAX_ROWS = 5_000   # hard cap on returned rows
+_SPARQL_TIMEOUT_S = 30    # seconds before aborting the query thread
+
+
 @router.post("", response_model=SparqlResponse)
 async def execute_sparql(
     req: SparqlRequest,
@@ -89,16 +93,28 @@ async def execute_sparql(
 
     graph = await asyncio.to_thread(_build_rdflib_graph, session)
     try:
-        query_results = await asyncio.to_thread(graph.query, req.query)
+        query_results = await asyncio.wait_for(
+            asyncio.to_thread(graph.query, req.query),
+            timeout=_SPARQL_TIMEOUT_S,
+        )
         columns = [str(var) for var in query_results.vars] if query_results.vars else []
         rows: List[Dict[str, Any]] = []
         for row in query_results:
+            if len(rows) >= _SPARQL_MAX_ROWS:
+                break
             row_data = {}
             for index, column in enumerate(columns):
                 value = row[index]
                 row_data[column] = str(value) if value is not None else None
             rows.append(row_data)
         return SparqlResponse(columns=columns, rows=rows, total=len(rows))
+    except asyncio.TimeoutError:
+        return SparqlResponse(
+            columns=[],
+            rows=[],
+            total=0,
+            error=f"Query timed out after {_SPARQL_TIMEOUT_S} seconds.",
+        )
     except Exception as exc:
         error = str(exc)
         line_match = re.search(r"line[\s:]+(\d+)", error, re.IGNORECASE)

@@ -54,28 +54,38 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    cors_origins = os.environ.get("EXPLORER_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    _raw_origins = os.environ.get(
+        "EXPLORER_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    )
+    _cors_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins.split(","),
+        allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+        max_age=600,
     )
+
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
 
     @app.exception_handler(KeyError)
     async def key_error_handler(_request: Request, exc: KeyError):
-        return JSONResponse(status_code=404, content={"detail": f"Not found: {exc}"})
+        _logger.warning("KeyError: %s", exc)
+        return JSONResponse(status_code=404, content={"detail": "Resource not found"})
 
     @app.exception_handler(ValueError)
     async def value_error_handler(_request: Request, exc: ValueError):
-        return JSONResponse(status_code=422, content={"detail": str(exc)})
+        _logger.warning("ValueError: %s", exc)
+        return JSONResponse(status_code=422, content={"detail": "Invalid input"})
 
     @app.exception_handler(Exception)
     async def generic_error_handler(_request: Request, exc: Exception):
         if isinstance(exc, HTTPException):
             raise exc
-        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+        _logger.exception("Unhandled exception")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     from .routes.analytics import router as analytics_router
     from .routes.annotations import router as annotations_router
@@ -99,6 +109,8 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
     app.include_router(provenance_router)
     app.include_router(vocabulary_router)
 
+    _WS_MAX_MESSAGE_BYTES = 64 * 1024  # 64 KB — control messages only
+
     @app.websocket("/ws/graph-updates")
     async def websocket_endpoint(websocket: WebSocket):
         manager: ConnectionManager = app.state.ws_manager
@@ -107,6 +119,9 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
         try:
             while True:
                 message = await websocket.receive_text()
+                if len(message) > _WS_MAX_MESSAGE_BYTES:
+                    await websocket.close(code=1009)  # 1009 = message too big
+                    break
                 if message.strip().lower() == "ping":
                     await manager.send_personal(websocket, "pong", {"ok": True})
         except WebSocketDisconnect:

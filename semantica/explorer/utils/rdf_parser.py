@@ -10,7 +10,7 @@ import rdflib
 from rdflib.namespace import RDF, RDFS, SKOS
 
 try:
-    import defusedxml.ElementTree as _defused_et  # noqa: F401 — import triggers patching
+    import defusedxml
     _HAS_DEFUSEDXML = True
 except ImportError:
     _HAS_DEFUSEDXML = False

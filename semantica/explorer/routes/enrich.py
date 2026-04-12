@@ -52,7 +52,7 @@ def _parse_rule(rule: str) -> Optional[Tuple[List[Tuple[str, List[str]]], Tuple[
     antecedent_text = cleaned[3:then_index]
     consequent_text = cleaned[then_index + 6 :]
     antecedents = []
-    for segment in re.split(r"\s+AND\s+", antecedent_text, flags=re.IGNORECASE):
+    for segment in re.split(r" AND ", " ".join(antecedent_text.split()), flags=re.IGNORECASE):
         parsed = _parse_fact(segment)
         if parsed is None:
             return None

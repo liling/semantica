@@ -6,14 +6,11 @@ compatible with ContextGraph.
 """
 
 from typing import Any, Dict, List, Tuple
+import importlib.util
 import rdflib
 from rdflib.namespace import RDF, RDFS, SKOS
 
-try:
-    import defusedxml
-    _HAS_DEFUSEDXML = True
-except ImportError:
-    _HAS_DEFUSEDXML = False
+_HAS_DEFUSEDXML = importlib.util.find_spec("defusedxml") is not None
 
 
 def _safe_parse_rdf(g: rdflib.Graph, data: bytes, rdf_format: str) -> None:

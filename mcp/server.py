@@ -39,7 +39,6 @@ def _err(request_id: Any, code: int, message: str, data: Any = None) -> dict:
 
 # JSON-RPC error codes
 _PARSE_ERROR = -32700
-_INVALID_REQUEST = -32600
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _INTERNAL_ERROR = -32603

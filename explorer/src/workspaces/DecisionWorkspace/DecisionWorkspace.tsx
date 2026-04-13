@@ -203,15 +203,21 @@ export function DecisionWorkspace() {
   const [filterQuery, setFilterQuery] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
     setListLoading(true);
-    fetch("/api/decisions")
-      .then((res) => res.json())
+    fetch("/api/decisions", { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load decisions: ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         setDecisions(data);
         if (data.length > 0) void handleSelectDecision(data[0]);
       })
-      .catch(console.error)
+      .catch((err) => { if (err.name !== "AbortError") console.error(err); })
       .finally(() => setListLoading(false));
+    return () => controller.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredDecisions = useMemo(() => {
@@ -229,15 +235,18 @@ export function DecisionWorkspace() {
     setSelectedDecision(d);
     setLoading(true);
     setChain([]);
+    const controller = new AbortController();
     try {
-      const res = await fetch(`/api/decisions/${d.decision_id}/chain`);
+      const res = await fetch(`/api/decisions/${encodeURIComponent(d.decision_id)}/chain`, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Failed to load chain: ${res.status}`);
       const data = await res.json();
       setChain(data.chain || []);
     } catch (e) {
-      console.error(e);
+      if ((e as DOMException).name !== "AbortError") console.error(e);
     } finally {
       setLoading(false);
     }
+    return () => controller.abort();
   };
 
   return (

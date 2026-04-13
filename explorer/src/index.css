@@ -63,3 +63,9 @@ code, pre, .mono {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+/* Skeleton pulse animation for loading placeholders */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%       { opacity: 0.85; }
+}

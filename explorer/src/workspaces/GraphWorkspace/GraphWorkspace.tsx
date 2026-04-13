@@ -816,6 +816,7 @@ export function GraphWorkspace() {
 
   const handleRunPredictions = useCallback(async () => {
     if (!selectedNodeId) return;
+    setIsRunningPredictions(true);
     try {
       const response = await fetch("/api/enrich/links", {
         method: "POST",
@@ -835,6 +836,8 @@ export function GraphWorkspace() {
     } catch (predictionError) {
       console.error("[GraphWorkspace] prediction failed", predictionError);
       setPredictions([]);
+    } finally {
+      setIsRunningPredictions(false);
     }
   }, [predictionType, selectedNodeId]);
 
@@ -1609,6 +1612,7 @@ export function GraphWorkspace() {
                       predictionType={predictionType}
                       onPredictionTypeChange={setPredictionType}
                       onRunPredictions={() => void handleRunPredictions()}
+                      isRunningPredictions={isRunningPredictions}
                       pathTargetId={pathTargetId}
                       onPathTargetChange={setPathTargetId}
                       onTracePath={() => void handleTracePath()}

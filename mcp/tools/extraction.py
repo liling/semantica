@@ -54,8 +54,9 @@ def handle_extract_relations(args: dict) -> dict:
         return {"error": "text is required", "relations": [], "triplets": []}
     _clear_cache()
     try:
-        from semantica.semantic_extract import RelationExtractor, TripletExtractor
-        relations = RelationExtractor().extract(text) or []
+        from semantica.semantic_extract import NamedEntityRecognizer, RelationExtractor, TripletExtractor
+        entities = NamedEntityRecognizer().extract(text) or []
+        relations = RelationExtractor().extract(text, entities) or []
         triplets = TripletExtractor().extract(text) or []
         return {
             "relations": [

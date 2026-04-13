@@ -108,7 +108,7 @@ def handle_extract_all(args: dict) -> dict:
         ]
 
         resolved = CoreferenceResolver().resolve(text)
-        relations = RelationExtractor().extract(resolved) or []
+        relations = RelationExtractor().extract(resolved, entities) or []
         result["relations"] = [
             {"source": getattr(r, "source", None),
              "type": getattr(r, "type", None),

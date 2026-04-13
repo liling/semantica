@@ -2,6 +2,7 @@
  * src/workspaces/DiffMergeWorkspace/DiffMergeWorkspace.tsx
  */
 import { useState } from "react";
+import { logEvent } from "../../store/registryStore";
 
 const THEME_CSS = `
   .glass-panel {
@@ -29,6 +30,11 @@ export function DiffMergeWorkspace() {
       const data = await res.json();
       if (data.merged_into) {
         setMsg(`Merge success: redirected ${data.edges_updated} edges to ${data.merged_into}`);
+        logEvent("merge", `Merged ${duplicateId} → ${data.merged_into} · ${data.edges_updated} edges redirected`, {
+          primary: data.merged_into,
+          duplicate: duplicateId,
+          edgesUpdated: data.edges_updated,
+        });
       } else {
         setMsg("Merge failed...");
       }

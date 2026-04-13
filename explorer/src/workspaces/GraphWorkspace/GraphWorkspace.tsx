@@ -1,6 +1,7 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { batchMergeEdges, batchMergeNodes, graph } from "../../store/graphStore";
+import { logEvent } from "../../store/registryStore";
 import type { EdgeAttributes, NodeAttributes } from "../../store/graphStore";
 import { curveGroupForPair } from "../../store/edgePairKeys.js";
 import { InspectorPanel, MetricChip, SurfaceCard } from "../../ui/primitives";
@@ -630,6 +631,7 @@ export function GraphWorkspace() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchError, setSearchError] = useState("");
   const [predictionType, setPredictionType] = useState("");
+  const [isRunningPredictions, setIsRunningPredictions] = useState(false);
   const [predictions, setPredictions] = useState<LinkPrediction[]>([]);
   const [pathTargetId, setPathTargetId] = useState("");
   const [pathResult, setPathResult] = useState<PathResponse | null>(null);
@@ -899,6 +901,7 @@ export function GraphWorkspace() {
               attributes: buildRealtimeNodeAttributes(payload),
             },
           ]);
+          logEvent("add-node", `Added node ${payload.label ?? payload.id}${payload.nodeType ? ` (${payload.nodeType})` : ""} via realtime ws`, { nodeId: payload.id, nodeType: payload.nodeType });
           sceneRef.current?.getRuntime()?.requestRender();
         }
         if (eventType === "ADD_EDGE") {
@@ -911,6 +914,7 @@ export function GraphWorkspace() {
               attributes: buildRealtimeEdgeAttributes(payload),
             },
           ]);
+          logEvent("add-edge", `Added edge ${payload.edgeType ?? payload.id} (${payload.source_id} → ${payload.target_id}) via realtime ws`, { edgeId: payload.id, edgeType: payload.edgeType, source: payload.source_id, target: payload.target_id });
           sceneRef.current?.getRuntime()?.requestRender();
         }
       } catch (socketError) {
@@ -1294,9 +1298,33 @@ export function GraphWorkspace() {
           onClick: () => void handleSearch(),
         },
         {
+          id: "zoom-in",
+          label: "＋ Zoom In",
+          title: "Zoom in (or scroll up on the canvas)",
+          onClick: () => {
+            const runtime = sceneRef.current?.getRuntime();
+            if (runtime?.renderer === "sigma") {
+              const camera = (runtime.scene as import("sigma").default).getCamera();
+              camera.animatedZoom({ duration: 200 });
+            }
+          },
+        },
+        {
+          id: "zoom-out",
+          label: "－ Zoom Out",
+          title: "Zoom out (or scroll down on the canvas)",
+          onClick: () => {
+            const runtime = sceneRef.current?.getRuntime();
+            if (runtime?.renderer === "sigma") {
+              const camera = (runtime.scene as import("sigma").default).getCamera();
+              camera.animatedUnzoom({ duration: 200 });
+            }
+          },
+        },
+        {
           id: "fit-view",
           label: "Fit View",
-          title: "Reset the camera to the current view",
+          title: "Reset the camera to fit the whole graph",
           onClick: () => sceneRef.current?.fitView(),
         },
         {

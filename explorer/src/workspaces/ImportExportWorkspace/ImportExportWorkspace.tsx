@@ -4,6 +4,7 @@
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { UploadCloud, Download, FileJson, FileText, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { logEvent } from "../../store/registryStore";
 
 const THEME_CSS = `
   .glass-panel {
@@ -107,6 +108,11 @@ export function ImportExportWorkspace() {
       
       const data = await res.json();
       showToast("success", `Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges!`);
+      logEvent("import", `Imported ${data.nodes_imported} nodes · ${data.edges_imported} edges from ${file.name}`, {
+        file: file.name,
+        nodesImported: data.nodes_imported,
+        edgesImported: data.edges_imported,
+      });
       setFile(null);
     } catch (err: any) {
       showToast("error", err.message || "An error occurred during import");
@@ -142,6 +148,7 @@ export function ImportExportWorkspace() {
       document.body.removeChild(a);
       
       showToast("success", "Export complete! Your download should begin shortly.");
+      logEvent("export", `Exported graph as ${exportFormat.toUpperCase()}`, { format: exportFormat });
     } catch (err: any) {
       showToast("error", err.message || "An error occurred during export");
     } finally {

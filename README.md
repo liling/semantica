@@ -67,6 +67,40 @@ See the community setup guide:
 
 ---
 
+## 🖥️ Semantica Knowledge Explorer
+
+A real-time visual interface for exploring every dimension of your knowledge graph — built into the repo under [`explorer/`](explorer/).
+
+| Workspace | What you can do |
+|---|---|
+| **Knowledge Graph** | Pan, zoom, and inspect a live Sigma.js graph canvas with ForceAtlas2 layout |
+| **Timeline** | Scrub through temporal events and watch the graph evolve |
+| **Decisions** | Browse the causal chain behind every recorded decision with outcome badges |
+| **Registry** | Live audit log of every graph mutation — add-node, add-edge, merge, delete |
+| **Entity Resolution** | Review and merge duplicate entities detected by the deduplication engine |
+| **KG Overview** | Aggregate stats, community breakdown, centrality heatmap |
+| **Ontology** | SKOS/OWL vocabulary hierarchy and auto-generated schema summary |
+
+### Run locally
+
+```bash
+# 1. Start the Semantica backend (port 8000)
+python -m semantica.server
+
+# 2. In a second terminal
+cd explorer
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** — the Explorer connects automatically. All `/api` and `/ws` traffic is proxied to `127.0.0.1:8000` by Vite, so no CORS configuration is needed.
+
+> **Requirements:** Node 18+ · Python 3.8+ · npm 9+
+
+For the full setup guide, troubleshooting, and production build instructions see [`explorer/README.md`](explorer/README.md).
+
+---
+
 ## Features
 
 ### Context & Decision Intelligence
@@ -347,6 +381,7 @@ Semantic memory with hybrid search and metadata filtering.
 | `semantica.change_management` | Version storage, change tracking, checksums, audit trails, compliance support for KGs and ontologies |
 | `semantica.triplet_store` | RDF triplet store integration — Blazegraph, Jena, RDF4J; SPARQL queries and bulk loading |
 | `semantica.visualization` | Interactive and static visualization of KGs, ontologies, embeddings, analytics, and temporal graphs |
+| [`explorer/`](explorer/) | **Semantica Knowledge Explorer** — React 19 + Sigma.js UI: graph canvas, decision viewer, causal chains, entity resolution, ontology browser, and registry audit log |
 | `semantica.seed` | Seed data management for initial KG construction from CSV, JSON, databases, and APIs |
 | `semantica.core` | Framework orchestration, configuration management, knowledge base construction, plugin system |
 | `semantica.llms` | LLM provider integrations — Groq, OpenAI, Novita AI, HuggingFace, LiteLLM |
@@ -643,6 +678,7 @@ if result.valid:
 - **`semantica.triplet_store`** — Blazegraph, Jena, RDF4J; SPARQL, bulk loading, SKOS helpers
 - **`semantica.visualization`** — KG, ontology, embedding, and temporal graph visualization
 - **`semantica.llms`** — Groq, OpenAI, Novita AI, HuggingFace, LiteLLM
+- **[`explorer/`](explorer/)** — **Semantica Knowledge Explorer** — browser UI for live graph inspection, decisions, entity resolution, and ontology browsing (`npm run dev` in `explorer/`)
 
 
 ---

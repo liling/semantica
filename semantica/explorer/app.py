@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
@@ -129,12 +129,14 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def root():
-        return {
-            "message": "Welcome to Semantica Knowledge Explorer",
-            "version": __version__,
-            "ui": "http://localhost:5174",
-            "docs": "http://localhost:8000/docs",
-        }
+        index_path = Path(__file__).resolve().parent.parent / "static" / "index.html"
+        if index_path.is_file():
+            return FileResponse(index_path)
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta charset="UTF-8">'
+            '<title>Semantica Knowledge Explorer</title></head>'
+            '<body><div id="root"></div></body></html>'
+        )
 
     @app.get("/api/health")
     async def health():

@@ -53,6 +53,14 @@ except (ImportError, OSError):
 
 from ..utils.exceptions import ProcessingError
 from ..utils.logging import get_logger
+
+# Optional import — keeps the visualizer usable even if the kg sub-package
+# is not installed, and avoids circular-import risk at module level.
+try:
+    from ..kg.knowledge_graph import KnowledgeGraph as _KnowledgeGraph
+except Exception:  # pragma: no cover
+    _KnowledgeGraph = None  # type: ignore[assignment,misc]
+
 from ..utils.progress_tracker import get_progress_tracker
 from .utils.color_schemes import ColorPalette, ColorScheme
 from .utils.export_formats import (
@@ -118,18 +126,45 @@ class KGVisualizer:
                 "Install with: pip install plotly"
             )
 
-    def _normalize_graph(self, graph: Any) -> Dict[str, Any]:
+    def _convert_knowledge_graph(self, kg: Any) -> Dict[str, Any]:
         """
-        Normalize graph input to the expected dict format.
+        Convert a KnowledgeGraph instance to the internal dict format.
 
-        Accepts either:
-        - A dict with "entities" and "relationships" keys (canonical format)
-        - Any object that exposes .entities and .relationships attributes
-          (e.g. a KnowledgeGraph dataclass returned by GraphBuilder.build())
+        Non-mutating. Preserves node types, labels, properties, edge types,
+        weights, and direction.
+
+        Args:
+            kg: A ``KnowledgeGraph`` instance.
 
         Returns:
             Dict with "entities", "relationships", and "metadata" keys.
         """
+        entities = getattr(kg, "entities", None) or []
+        relationships = getattr(kg, "relationships", None) or []
+        metadata = getattr(kg, "metadata", None) or {}
+        return {
+            "entities": list(entities),
+            "relationships": list(relationships),
+            "metadata": dict(metadata),
+        }
+
+    def _normalize_graph(self, graph: Any) -> Dict[str, Any]:
+        """
+        Normalize graph input to the expected dict format.
+
+        Accepts:
+        - A ``KnowledgeGraph`` instance (routed through ``_convert_knowledge_graph``)
+        - A dict with "entities" and "relationships" keys (canonical format)
+        - Any object that exposes .entities and .relationships attributes
+          (duck-typed, e.g. custom dataclasses)
+
+        Returns:
+            Dict with "entities", "relationships", and "metadata" keys.
+        """
+        # Explicit fast-path for the formal KnowledgeGraph type
+        if _KnowledgeGraph is not None and isinstance(graph, _KnowledgeGraph):
+            return self._convert_knowledge_graph(graph)
+
         if isinstance(graph, dict):
             return graph
 

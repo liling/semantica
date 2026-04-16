@@ -283,5 +283,166 @@ class TestAllVisualizeMethodsAcceptKGObject(unittest.TestCase):
         self.viz._normalize_graph.assert_called_once_with(self.kg)
 
 
+# ---------------------------------------------------------------------------
+# Issue #471 — formal KnowledgeGraph type support
+# ---------------------------------------------------------------------------
+
+class TestFormalKnowledgeGraphType(unittest.TestCase):
+    """
+    Regression tests for issue #471.
+
+    The formal ``semantica.kg.KnowledgeGraph`` dataclass must be accepted by
+    every public visualize_* method without requiring any manual conversion.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from semantica.kg.knowledge_graph import KnowledgeGraph
+            cls.KnowledgeGraph = KnowledgeGraph
+        except ImportError:
+            cls.KnowledgeGraph = None
+
+    def _make_kg(self):
+        if self.KnowledgeGraph is None:
+            self.skipTest("semantica.kg.KnowledgeGraph not available")
+        return self.KnowledgeGraph(
+            entities=ENTITIES,
+            relationships=RELATIONSHIPS,
+            metadata={"version": "test"},
+        )
+
+    def test_convert_knowledge_graph_entities(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        result = viz._convert_knowledge_graph(kg)
+        self.assertEqual(result["entities"], ENTITIES)
+
+    def test_convert_knowledge_graph_relationships(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        result = viz._convert_knowledge_graph(kg)
+        self.assertEqual(result["relationships"], RELATIONSHIPS)
+
+    def test_convert_knowledge_graph_metadata(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        result = viz._convert_knowledge_graph(kg)
+        self.assertEqual(result["metadata"], {"version": "test"})
+
+    def test_convert_knowledge_graph_does_not_mutate(self):
+        kg = self._make_kg()
+        original_entities = list(kg.entities)
+        original_relationships = list(kg.relationships)
+        viz = _make_viz()
+        viz._convert_knowledge_graph(kg)
+        self.assertEqual(kg.entities, original_entities)
+        self.assertEqual(kg.relationships, original_relationships)
+
+    def test_convert_knowledge_graph_is_deterministic(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        self.assertEqual(viz._convert_knowledge_graph(kg), viz._convert_knowledge_graph(kg))
+
+    def test_normalize_graph_routes_kg_type(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        viz._convert_knowledge_graph = MagicMock(return_value=GRAPH_DICT)
+        viz._normalize_graph(kg)
+        viz._convert_knowledge_graph.assert_called_once_with(kg)
+
+    def test_normalize_graph_returns_dict_for_kg_type(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        result = viz._normalize_graph(kg)
+        self.assertIsInstance(result, dict)
+        self.assertIn("entities", result)
+        self.assertIn("relationships", result)
+
+    def _run_visualize_network(self, graph_arg):
+        mock_fig = MagicMock()
+        mock_go = sys.modules["plotly.graph_objects"]
+        mock_go.Figure.return_value = mock_fig
+        mock_go.Scatter.return_value = MagicMock()
+        mock_go.Layout.return_value = MagicMock()
+        viz = _make_viz()
+        fake_pos = {"e1": (0.0, 0.0), "e2": (1.0, 1.0)}
+        viz.force_layout = MagicMock()
+        viz.force_layout.compute_layout.return_value = fake_pos
+        viz.hierarchical_layout = MagicMock()
+        viz.circular_layout = MagicMock()
+        with (
+            patch(
+                "semantica.visualization.kg_visualizer.ColorPalette.get_entity_type_colors",
+                return_value={"Person": "#ff0000"},
+            ),
+            patch(
+                "semantica.visualization.kg_visualizer.ColorPalette.get_colors",
+                return_value=["#ff0000"],
+            ),
+        ):
+            return viz.visualize_network(graph_arg, output="interactive")
+
+    def test_visualize_network_accepts_knowledge_graph(self):
+        self.assertIsNotNone(self._run_visualize_network(self._make_kg()))
+
+    def test_visualize_communities_accepts_knowledge_graph(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        viz._normalize_graph = MagicMock(return_value=GRAPH_DICT)
+        viz._visualize_network_plotly = MagicMock(return_value=MagicMock())
+        communities = {"node_assignments": {"e1": 0, "e2": 1}, "num_communities": 2}
+        with patch(
+            "semantica.visualization.kg_visualizer.ColorPalette.get_community_colors",
+            return_value=["#ff0000", "#00ff00"],
+        ):
+            viz.visualize_communities(kg, communities=communities)
+        viz._normalize_graph.assert_called_once_with(kg)
+
+    def test_visualize_centrality_accepts_knowledge_graph(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        viz._normalize_graph = MagicMock(return_value=GRAPH_DICT)
+        viz._visualize_network_plotly = MagicMock(return_value=MagicMock())
+        viz.visualize_centrality(kg, centrality={"centrality": {}})
+        viz._normalize_graph.assert_called_once_with(kg)
+
+    def test_visualize_entity_types_accepts_knowledge_graph(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        viz._normalize_graph = MagicMock(return_value=GRAPH_DICT)
+        sys.modules["plotly.express"].bar.return_value = MagicMock()
+        viz.visualize_entity_types(kg)
+        viz._normalize_graph.assert_called_once_with(kg)
+
+    def test_visualize_relationship_matrix_accepts_knowledge_graph(self):
+        kg = self._make_kg()
+        viz = _make_viz()
+        viz._normalize_graph = MagicMock(return_value=GRAPH_DICT)
+        sys.modules["plotly.graph_objects"].Figure.return_value = MagicMock()
+        sys.modules["plotly.graph_objects"].Heatmap.return_value = MagicMock()
+        viz.visualize_relationship_matrix(kg)
+        viz._normalize_graph.assert_called_once_with(kg)
+
+    def test_knowledge_graph_importable_from_kg_module(self):
+        if self.KnowledgeGraph is None:
+            self.skipTest("semantica.kg.KnowledgeGraph not available")
+        try:
+            import semantica.kg as _kg_module
+            _ = _kg_module.KnowledgeGraph
+        except (ImportError, AttributeError) as exc:
+            self.fail(f"KnowledgeGraph not exported from semantica.kg: {exc}")
+
+    def test_knowledge_graph_empty_defaults(self):
+        kg = self.KnowledgeGraph()
+        self.assertEqual(kg.entities, [])
+        self.assertEqual(kg.relationships, [])
+        self.assertFalse(bool(kg))
+
+    def test_knowledge_graph_len(self):
+        kg = self._make_kg()
+        self.assertEqual(len(kg), len(ENTITIES))
+
+
 if __name__ == "__main__":
     unittest.main()

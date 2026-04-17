@@ -108,6 +108,7 @@ Production Use Cases:
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 import threading
 import itertools
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -132,15 +133,31 @@ except ImportError:
 def _parse_iso_dt(value: str) -> Optional[datetime]:
     """Parse an ISO datetime string into a tz-naive UTC datetime.
 
-    Always returns a naive datetime in UTC so callers can compare uniformly
-    without worrying about mixed aware/naive arithmetic.
+    Supported formats (in priority order):
+        - Year-only shorthand:  "1990"  → "1990-01-01"
+        - Date-only:            "1990-06-15"
+        - Full ISO (with tz):   "1990-06-15T00:00:00+00:00" / "...Z"
+        - Full ISO (naive):     "1990-06-15T00:00:00"
+
+    Returns None on failure; callers must treat the node as Always-Active.
     """
+    import logging
+    import re as _re
+    if not value:
+        return None
+    s = str(value).strip()
+    if _re.fullmatch(r"\d{4}", s):
+        s = f"{s}-01-01"
+    s = s.replace("Z", "+00:00")
     try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s)
         if dt.tzinfo is not None:
             dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
         return dt
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError) as e:
+        logging.getLogger("semantica.context").warning(
+            "Malformed temporal value %r — treating node as Always-Active. (%s)", value, e
+        )
         return None
 
 
@@ -162,6 +179,116 @@ def _normalize_temporal_input(value: Optional[Union[str, int, float, datetime]])
     raise ValueError("Temporal values must be datetime, epoch seconds, ISO strings, or None")
 
 
+def _pick_first(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _default_edge_id(
+    source_id: str,
+    target_id: str,
+    edge_type: str,
+    weight: float,
+    metadata: Dict[str, Any],
+    valid_from: Optional[str],
+    valid_until: Optional[str],
+) -> str:
+    payload = json.dumps(
+        {
+            "source": source_id,
+            "target": target_id,
+            "type": edge_type,
+            "weight": weight,
+            "valid_from": valid_from,
+            "valid_until": valid_until,
+            "metadata": metadata,
+        },
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def _resolve_edge_identity(
+    *,
+    source_id: str,
+    target_id: str,
+    edge_type: str,
+    weight: float,
+    metadata: Dict[str, Any],
+    valid_from: Optional[str],
+    valid_until: Optional[str],
+    edge_id: Any = None,
+    family_id: Any = None,
+) -> Tuple[str, str]:
+    resolved_edge_id = str(
+        _pick_first(
+            edge_id,
+            _default_edge_id(
+                source_id=source_id,
+                target_id=target_id,
+                edge_type=edge_type,
+                weight=weight,
+                metadata=metadata,
+                valid_from=valid_from,
+                valid_until=valid_until,
+            ),
+        )
+    )
+    resolved_family_id = str(_pick_first(family_id, resolved_edge_id))
+    return resolved_edge_id, resolved_family_id
+
+
+def _coerce_metadata_map(*values: Any) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for value in values:
+        if isinstance(value, dict):
+            merged.update(value)
+    return merged
+
+
+def _coerce_node_id(raw_node: Dict[str, Any]) -> Optional[str]:
+    value = _pick_first(
+        raw_node.get("id"),
+        raw_node.get("node_id"),
+        raw_node.get("_id"),
+        raw_node.get("uri"),
+        raw_node.get("key"),
+    )
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _coerce_edge_endpoint(raw_edge: Dict[str, Any], prefix: str) -> Optional[str]:
+    prefix = prefix.lower()
+    candidates = {
+        "source": ["source_id", "source", "start", "start_id", "from", "src", "START_ID", ":START_ID"],
+        "target": ["target_id", "target", "end", "end_id", "to", "dst", "END_ID", ":END_ID"],
+    }[prefix]
+    value = _pick_first(*(raw_edge.get(candidate) for candidate in candidates))
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _coerce_float(value: Any, default: float = 1.0) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class ContextNode:
     """Context graph node (Internal implementation)."""
@@ -171,8 +298,8 @@ class ContextNode:
     content: str
     metadata: Dict[str, Any] = field(default_factory=dict)
     properties: Dict[str, Any] = field(default_factory=dict)
-    valid_from: Optional[str] = None   # ISO datetime string, e.g. "2026-01-01T00:00:00"
-    valid_until: Optional[str] = None  # ISO datetime string; None = no expiry
+    valid_from: Optional[str] = None  
+    valid_until: Optional[str] = None  
 
     def is_active(self, at_time: Optional[datetime] = None) -> bool:
         """Return True if this node is active at the given time (defaults to now).
@@ -212,11 +339,31 @@ class ContextEdge:
     source_id: str
     target_id: str
     edge_type: str
+    edge_id: str = ""
     weight: float = 1.0
+    family_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    valid_from: Optional[str] = None   # ISO datetime string
-    valid_until: Optional[str] = None  # ISO datetime string; None = no expiry
+    valid_from: Optional[str] = None  
+    valid_until: Optional[str] = None  
 
+    def __post_init__(self) -> None:
+        self.source_id = str(self.source_id)
+        self.target_id = str(self.target_id)
+        self.edge_type = str(self.edge_type or "related_to")
+        self.weight = _coerce_float(self.weight, default=1.0)
+        if not isinstance(self.metadata, dict):
+            self.metadata = {}
+        self.edge_id, self.family_id = _resolve_edge_identity(
+            source_id=self.source_id,
+            target_id=self.target_id,
+            edge_type=self.edge_type,
+            weight=self.weight,
+            metadata=self.metadata,
+            valid_from=self.valid_from,
+            valid_until=self.valid_until,
+            edge_id=self.edge_id,
+            family_id=self.family_id,
+        )
     def is_active(self, at_time: Optional[datetime] = None) -> bool:
         """Return True if this edge is active at the given time (defaults to now).
 
@@ -239,6 +386,8 @@ class ContextEdge:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format."""
         d = {
+            "id": self.edge_id,
+            "familyId": self.family_id or self.edge_id,
             "source_id": self.source_id,
             "target_id": self.target_id,
             "type": self.edge_type,
@@ -290,35 +439,31 @@ class ContextGraph:
 
         self.entity_linker = self.config.get("entity_linker") or EntityLinker()
 
-        # Thread safety lock
+
         self._lock = threading.RLock()
 
-        # Stable identifier so this graph can be referenced after save/load
         self.graph_id: str = str(uuid.uuid4())
 
-        # Graph structure
         self.nodes: Dict[str, ContextNode] = {}
         self.edges: List[ContextEdge] = []
 
-        # Adjacency list for efficient traversal: source_id -> list of edges
         self._adjacency: Dict[str, List[ContextEdge]] = defaultdict(list)
 
-        # Indexes
+
         self.node_type_index: Dict[str, Set[str]] = defaultdict(set)
         self.edge_type_index: Dict[str, List[ContextEdge]] = defaultdict(list)
 
-        # Cross-graph navigation: link_id -> (other_graph, source_node_id, target_node_id)
         self._linked_graphs: Dict[str, Tuple["ContextGraph", str, str]] = {}
-        # Unresolved link metadata (populated after load_from_file, before resolve_links)
+
         self._unresolved_links: Dict[str, Dict[str, str]] = {}
 
-        # Progress tracker
+  
         self.progress_tracker = get_progress_tracker()
-        # Ensure progress tracker is enabled
+  
         if not self.progress_tracker.enabled:
             self.progress_tracker.enabled = True
         
-        # Initialize advanced KG components if available
+   
         self.kg_components = {}
         self._analytics_cache = {}
         
@@ -344,7 +489,7 @@ class ContextGraph:
                 self.logger.warning(f"Failed to initialize KG components: {e}")
                 self.kg_components = {}
 
-    # --- GraphStore Protocol Implementation ---
+
 
     def add_nodes(self, nodes: List[Dict[str, Any]]) -> int:
         """
@@ -358,29 +503,61 @@ class ContextGraph:
         """
         count = 0
         with self._lock:
-            for node in nodes:
-                # Extract content from properties if not explicit
-                node_props = node.get("properties", {})
-                content = node_props.get("content", node.get("id"))
-                # Restore validity windows from properties (written there by ContextNode.to_dict)
-                # or from top-level keys on the node dict
-                valid_from = (
-                    node.get("valid_from")
-                    or node_props.get("valid_from")
+            for raw_node in nodes:
+                if not isinstance(raw_node, dict):
+                    continue
+
+                node_id = _coerce_node_id(raw_node)
+                if node_id is None:
+                    self.logger.warning("Skipping node without a usable id: %r", raw_node)
+                    continue
+
+                node_props = _coerce_metadata_map(
+                    raw_node.get("metadata"),
+                    raw_node.get("properties"),
                 )
-                valid_until = (
-                    node.get("valid_until")
-                    or node_props.get("valid_until")
+                node_type = _pick_first(
+                    raw_node.get("type"),
+                    raw_node.get("node_type"),
+                    raw_node.get("category"),
+                    raw_node.get(":LABEL"),
+                    node_props.get("type"),
+                    "entity",
+                )
+                content = _pick_first(
+                    raw_node.get("content"),
+                    raw_node.get("text"),
+                    raw_node.get("label"),
+                    raw_node.get("name"),
+                    raw_node.get("title"),
+                    raw_node.get("pref_label"),
+                    node_props.get("content"),
+                    node_props.get("text"),
+                    node_props.get("label"),
+                    node_props.get("name"),
+                    node_props.get("title"),
+                    node_props.get("pref_label"),
+                    node_id,
+                )
+
+                valid_from = _pick_first(
+                    raw_node.get("valid_from"),
+                    node_props.get("valid_from"),
+                )
+                valid_until = _pick_first(
+                    raw_node.get("valid_until"),
+                    node_props.get("valid_until"),
                 )
                 metadata = {
-                    k: v for k, v in node_props.items()
-                    if k not in ("content", "valid_from", "valid_until")
+                    k: v
+                    for k, v in node_props.items()
+                    if k not in ("content", "text", "valid_from", "valid_until")
                 }
 
                 internal_node = ContextNode(
-                    node_id=node.get("id"),
-                    node_type=node.get("type", "entity"),
-                    content=content,
+                    node_id=node_id,
+                    node_type=str(node_type or "entity"),
+                    content=str(content or node_id),
                     metadata=metadata,
                     properties=node_props,
                     valid_from=valid_from,
@@ -404,22 +581,64 @@ class ContextGraph:
         """
         count = 0
         with self._lock:
-            for edge in edges:
-                edge_props = edge.get("properties") or edge.get("metadata", {})
-                valid_from = edge.get("valid_from") or edge_props.get("valid_from")
-                valid_until = edge.get("valid_until") or edge_props.get("valid_until")
-                
-                source_id = edge.get("source_id") or edge.get("source")
-                target_id = edge.get("target_id") or edge.get("target")
-
-                if not source_id or not target_id:
+            for raw_edge in edges:
+                if not isinstance(raw_edge, dict):
                     continue
 
-                internal_edge = ContextEdge(
+                source_id = _coerce_edge_endpoint(raw_edge, "source")
+                target_id = _coerce_edge_endpoint(raw_edge, "target")
+                if source_id is None or target_id is None:
+                    self.logger.warning("Skipping edge without usable endpoints: %r", raw_edge)
+                    continue
+
+                edge_props = _coerce_metadata_map(
+                    raw_edge.get("metadata"),
+                    raw_edge.get("properties"),
+                )
+                edge_type = _pick_first(
+                    raw_edge.get("type"),
+                    raw_edge.get("edge_type"),
+                    raw_edge.get("relationship"),
+                    raw_edge.get("predicate"),
+                    raw_edge.get("relation"),
+                    raw_edge.get(":TYPE"),
+                    edge_props.get("type"),
+                    "related_to",
+                )
+
+                valid_from = _pick_first(raw_edge.get("valid_from"), edge_props.get("valid_from"))
+                valid_until = _pick_first(raw_edge.get("valid_until"), edge_props.get("valid_until"))
+                weight = _coerce_float(_pick_first(raw_edge.get("weight"), edge_props.get("weight")), default=1.0)
+                explicit_edge_id = _pick_first(
+                    raw_edge.get("id"),
+                    raw_edge.get("edge_id"),
+                    edge_props.pop("id", None),
+                    edge_props.pop("edge_id", None),
+                )
+                explicit_family_id = _pick_first(
+                    raw_edge.get("familyId"),
+                    raw_edge.get("family_id"),
+                    edge_props.pop("familyId", None),
+                    edge_props.pop("family_id", None),
+                )
+                edge_id, family_id = _resolve_edge_identity(
                     source_id=source_id,
                     target_id=target_id,
-                    edge_type=edge.get("type", "related_to"),
-                    weight=edge.get("weight", 1.0),
+                    edge_type=str(edge_type or "related_to"),
+                    weight=weight,
+                    metadata=edge_props,
+                    valid_from=valid_from,
+                    valid_until=valid_until,
+                    edge_id=explicit_edge_id,
+                    family_id=explicit_family_id,
+                )
+                internal_edge = ContextEdge(
+                    edge_id=edge_id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    edge_type=str(edge_type or "related_to"),
+                    family_id=str(family_id) if family_id is not None else edge_id,
+                    weight=weight,
                     metadata=edge_props,
                     valid_from=valid_from,
                     valid_until=valid_until,
@@ -505,6 +724,8 @@ class ContextGraph:
             for edge in self._adjacency.get(source_id, []):
                 if edge.target_id == target_id:
                     data = edge.metadata.copy()
+                    data["id"] = edge.edge_id
+                    data["familyId"] = edge.family_id or edge.edge_id
                     data["type"] = edge.edge_type
                     data["weight"] = edge.weight
                     return data
@@ -671,12 +892,27 @@ class ContextGraph:
         """
         valid_from = properties.pop("valid_from", None)
         valid_until = properties.pop("valid_until", None)
+        explicit_edge_id = properties.pop("id", properties.pop("edge_id", None))
+        explicit_family_id = properties.pop("familyId", properties.pop("family_id", None))
+        edge_id, family_id = _resolve_edge_identity(
+            source_id=source_id,
+            target_id=target_id,
+            edge_type=edge_type,
+            weight=weight,
+            metadata=properties,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            edge_id=explicit_edge_id,
+            family_id=explicit_family_id,
+        )
         with self._lock:
             return self._add_internal_edge(
                 ContextEdge(
+                    edge_id=edge_id,
                     source_id=source_id,
                     target_id=target_id,
                     edge_type=edge_type,
+                    family_id=str(family_id) if family_id is not None else edge_id,
                     weight=weight,
                     metadata=properties,
                     valid_from=valid_from,
@@ -694,8 +930,7 @@ class ContextGraph:
         import json
 
         with self._lock:
-            # Serialise cross-graph link metadata (object references are not serialisable,
-            # so we store other_graph_id; callers can reconnect with resolve_links()).
+    
             links_data = []
             for link_id, (other_graph, source_node_id, target_node_id) in self._linked_graphs.items():
                 links_data.append(
@@ -736,6 +971,17 @@ class ContextGraph:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        if isinstance(data, list):
+            if data and isinstance(data[0], dict) and any(
+                key in data[0]
+                for key in ("source", "source_id", "target", "target_id", "START_ID", ":START_ID")
+            ):
+                data = {"edges": data, "nodes": []}
+            else:
+                data = {"nodes": data, "edges": []}
+        elif not isinstance(data, dict):
+            raise ValueError("Graph file must contain a JSON object or array payload")
+
         with self._lock:
             # Clear existing
             self.nodes.clear()
@@ -750,10 +996,22 @@ class ContextGraph:
                 self.graph_id = data["graph_id"]
 
     
-            nodes = data.get("nodes", [])
+            nodes = data.get("nodes")
+            if nodes is None:
+                nodes = data.get("entities")
+            if nodes is None:
+                nodes = data.get("vertices")
+            if nodes is None:
+                nodes = []
             self.add_nodes(nodes)
 
-            edges = data.get("edges", [])
+            edges = data.get("edges")
+            if edges is None:
+                edges = data.get("relationships")
+            if edges is None:
+                edges = data.get("links")
+            if edges is None:
+                edges = []
             self.add_edges(edges)
 
         
@@ -786,11 +1044,10 @@ class ContextGraph:
         """Find nodes lazily"""
         with self._lock:
             if node_type:
-                # Sets are unordered, sort IDs for deterministic pagination.
-                # Guard against non-string IDs (None/int) which cause sorted() TypeError.
+                # Sets are unordered, sort IDs for deterministic pagination
                 raw_ids = sorted(
-                    nid for nid in self.node_type_index.get(node_type, set())
-                    if isinstance(nid, str)
+                    (node_id for node_id in self.node_type_index.get(node_type, set()) if node_id is not None),
+                    key=lambda value: str(value),
                 )
                 source = (self.nodes[nid] for nid in raw_ids if nid in self.nodes)
             else:
@@ -821,8 +1078,8 @@ class ContextGraph:
         with self._lock:
             if node_type:
                 raw_ids = sorted(
-                    nid for nid in self.node_type_index.get(node_type, set())
-                    if isinstance(nid, str)
+                    (node_id for node_id in self.node_type_index.get(node_type, set()) if node_id is not None),
+                    key=lambda value: str(value),
                 )
                 source = (self.nodes[nid] for nid in raw_ids if nid in self.nodes)
             else:
@@ -983,11 +1240,15 @@ class ContextGraph:
             
             gen = (
                 {
-                    "source": e.source_id or "",
-                    "target": e.target_id or "",
-                    "type": e.edge_type or "related_to",
-                    "weight": e.weight if e.weight is not None else 1.0,
-                    "metadata": e.metadata or {},
+                    "id": e.edge_id,
+                    "familyId": e.family_id or e.edge_id,
+                    "source": e.source_id,
+                    "target": e.target_id,
+                    "type": e.edge_type,
+                    "weight": e.weight,
+                    "metadata": e.metadata,
+                    "valid_from": e.valid_from,
+                    "valid_until": e.valid_until,
                 }
                 for e in source if e.source_id and e.target_id
             )
@@ -1067,7 +1328,7 @@ class ContextGraph:
             return datetime.fromtimestamp(timestamp_value)
         elif isinstance(timestamp_value, str):
             # Handle ISO format with optional Z suffix
-            timestamp_str = timestamp_value.rstrip('Z')  # Remove Z if present
+            timestamp_str = timestamp_value.rstrip('Z')  #
             try:
                 return datetime.fromisoformat(timestamp_str)
             except ValueError:
@@ -1079,6 +1340,9 @@ class ContextGraph:
 
     def _add_internal_node(self, node: ContextNode) -> bool:
         """Internal method to add a node."""
+        if node.node_id is None or (isinstance(node.node_id, str) and not node.node_id.strip()):
+            self.logger.warning("Skipping internal node with invalid id: %r", node)
+            return False
         with self._lock:
             self.nodes[node.node_id] = node
             # Handle edge case where node_type might be None or not a string
@@ -1099,6 +1363,9 @@ class ContextGraph:
     
     def _add_internal_edge(self, edge: ContextEdge) -> bool:
         """Internal method to add an edge."""
+        if edge.source_id is None or edge.target_id is None:
+            self.logger.warning("Skipping internal edge with invalid endpoints: %r", edge)
+            return False
         with self._lock:
             # Ensure nodes exist
             if edge.source_id not in self.nodes:
@@ -1117,14 +1384,11 @@ class ContextGraph:
         if getattr(self, "mutation_callback", None) and not getattr(
             self, "_suspend_mutation_callback", False
         ):
-            import json
-
-            edge_id = json.dumps([edge.source_id, edge.edge_type, edge.target_id])
             try:
-                self.mutation_callback("ADD_EDGE", edge_id, edge.to_dict())
+                self.mutation_callback("ADD_EDGE", edge.edge_id, edge.to_dict())
             except Exception as e:
                 self.logger.warning(
-                    f"Audit trail callback failed for edge {edge_id}: {e}"
+                    f"Audit trail callback failed for edge {edge.edge_id}: {e}"
                 )
         return True
 
@@ -1382,11 +1646,15 @@ class ContextGraph:
         edges_out = []
         for e in self.edges:
             entry = {
+                "id": e.edge_id,
+                "familyId": e.family_id or e.edge_id,
                 "source": e.source_id,
                 "target": e.target_id,
                 "type": e.edge_type,
                 "weight": e.weight,
             }
+            if e.metadata:
+                entry["metadata"] = e.metadata
             if e.valid_from is not None:
                 entry["valid_from"] = e.valid_from
             if e.valid_until is not None:
@@ -1423,12 +1691,27 @@ class ContextGraph:
 
         # Add edges — restore validity windows if present
         for edge_data in graph_dict.get("edges", []):
-            edge = ContextEdge(
+            edge_metadata = edge_data.get("metadata", edge_data.get("properties", {})) or {}
+            edge_weight = edge_data.get("weight", 1.0)
+            edge_id, family_id = _resolve_edge_identity(
                 source_id=edge_data["source"],
                 target_id=edge_data["target"],
                 edge_type=edge_data["type"],
-                weight=edge_data.get("weight", 1.0),
-                metadata=edge_data.get("metadata", {}),
+                weight=edge_weight,
+                metadata=edge_metadata,
+                valid_from=edge_data.get("valid_from"),
+                valid_until=edge_data.get("valid_until"),
+                edge_id=edge_data.get("id", edge_data.get("edge_id")),
+                family_id=edge_data.get("familyId", edge_data.get("family_id")),
+            )
+            edge = ContextEdge(
+                edge_id=edge_id,
+                source_id=edge_data["source"],
+                target_id=edge_data["target"],
+                edge_type=edge_data["type"],
+                weight=edge_weight,
+                family_id=family_id,
+                metadata=edge_metadata,
                 valid_from=edge_data.get("valid_from"),
                 valid_until=edge_data.get("valid_until"),
             )

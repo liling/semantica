@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 """
+=======
+﻿"""
+>>>>>>> upstream/main
 Provenance routes for lineage visualization and exportable reports.
 """
 
@@ -29,7 +33,10 @@ class ProvenanceEdge(BaseModel):
     source: str
     target: str
     label: str
+<<<<<<< HEAD
     direction: str  # "upstream" | "downstream" | "lateral"
+=======
+>>>>>>> upstream/main
 
 
 class ProvenanceResponse(BaseModel):
@@ -68,7 +75,11 @@ def _build_provenance(session: GraphSession, node_id: Optional[str] = None) -> d
         if edge.source_id in hop_nodes or edge.target_id in hop_nodes:
             graph.add_edge(edge.source_id, edge.target_id, label=edge.edge_type)
 
+<<<<<<< HEAD
     subgraph = nx.ego_graph(graph, node_id, radius=2, undirected=True)
+=======
+    subgraph = nx.ego_graph(graph, node_id, radius=2, undirected=False)
+>>>>>>> upstream/main
     provenance_nodes: List[Dict[str, Any]] = []
     for graph_node_id in subgraph.nodes():
         node = session.graph.nodes.get(graph_node_id)
@@ -86,6 +97,7 @@ def _build_provenance(session: GraphSession, node_id: Optional[str] = None) -> d
 
     provenance_edges: List[Dict[str, Any]] = []
     for source, target, data in subgraph.edges(data=True):
+<<<<<<< HEAD
         if target == node_id:
             direction = "upstream"
         elif source == node_id:
@@ -93,13 +105,18 @@ def _build_provenance(session: GraphSession, node_id: Optional[str] = None) -> d
         else:
             direction = "lateral"
 
+=======
+>>>>>>> upstream/main
         provenance_edges.append(
             {
                 "id": f"{source}-{target}",
                 "source": source,
                 "target": target,
                 "label": data.get("label", "related_to"),
+<<<<<<< HEAD
                 "direction": direction,
+=======
+>>>>>>> upstream/main
             }
         )
 
@@ -138,6 +155,7 @@ def _render_markdown(report: Dict[str, Any]) -> str:
     for node in report.get("lineage", {}).get("nodes", []):
         lines.append(f"- `{node['id']}` ({node['prov_type']}): {node['label']}")
 
+<<<<<<< HEAD
     edges = report.get("lineage", {}).get("edges", [])
     grouped_edges = {
         "upstream": [],
@@ -163,6 +181,11 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         for edge in grouped_edges["lateral"]:
             lines.append(f"- `{edge['source']}` -[{edge['label']}]-> `{edge['target']}`")
 
+=======
+    lines.extend(["", "## Lineage Edges"])
+    for edge in report.get("lineage", {}).get("edges", []):
+        lines.append(f"- `{edge['source']}` -[{edge['label']}]-> `{edge['target']}`")
+>>>>>>> upstream/main
     return "\n".join(lines)
 
 

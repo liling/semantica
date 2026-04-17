@@ -1,12 +1,14 @@
-"""
-Graph routes — node / edge / path / search endpoints.
+﻿"""
+Graph routes for explorer node, edge, path, and search APIs.
 """
 
 import asyncio
+from enum import Enum
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ...utils.helpers import classify_path_distance
 from ..dependencies import get_session
 from ..schemas import (
     EdgeListResponse,
@@ -25,37 +27,53 @@ from ..session import GraphSession
 router = APIRouter(prefix="/api/graph", tags=["Graph"])
 
 
-def _node_dict_to_response(n: dict) -> NodeResponse:
-    """Convert a ContextGraph node dict to a NodeResponse."""
-    meta = n.get("metadata", {})
-    return NodeResponse(
-        id=n.get("id", ""),
-        type=n.get("type", "entity"),
-        content=n.get("content", meta.get("content", "")),
-        properties=meta,
-        valid_from=meta.get("valid_from"),
-        valid_until=meta.get("valid_until"),
-    )
+def _parse_bbox(raw_bbox: Optional[str]) -> Optional[tuple[float, float, float, float]]:
+    if not raw_bbox:
+        return None
+    parts = [part.strip() for part in raw_bbox.split(",")]
+    if len(parts) != 4:
+        raise ValueError("bbox must be four comma-separated numbers: min_x,min_y,max_x,max_y")
+    min_x, min_y, max_x, max_y = [float(part) for part in parts]
+    if min_x > max_x or min_y > max_y:
+        raise ValueError("bbox minimum values must be less than or equal to maximum values")
+    return min_x, min_y, max_x, max_y
 
+
+def _node_response(node: dict) -> NodeResponse:
+    return NodeResponse(**node)
+
+
+def _edge_response(edge: dict) -> EdgeResponse:
+    return EdgeResponse(**edge)
 
 
 @router.get("/nodes", response_model=NodeListResponse)
 async def list_nodes(
     type: Optional[str] = Query(None, description="Filter by node type"),
     search: Optional[str] = Query(None, description="Keyword search over node content"),
+    bbox: Optional[str] = Query(None, description="Viewport filter: min_x,min_y,max_x,max_y"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=5000),
+    cursor: Optional[str] = Query(None, description="Opaque cursor for forward pagination"),
     session: GraphSession = Depends(get_session),
 ):
-    """List nodes with optional filtering and pagination."""
-    nodes, total = await asyncio.to_thread(
-        session.get_nodes, node_type=type, search=search, skip=skip, limit=limit
+    parsed_bbox = _parse_bbox(bbox)
+    nodes, total, next_cursor = await asyncio.to_thread(
+        session.paginate_nodes,
+        node_type=type,
+        search=search,
+        skip=skip,
+        limit=limit,
+        cursor=cursor,
+        bbox=parsed_bbox,
     )
     return NodeListResponse(
-        nodes=[_node_dict_to_response(n) for n in nodes],
+        nodes=[_node_response(node) for node in nodes],
         total=total,
         skip=skip,
         limit=limit,
+        next_cursor=next_cursor,
+        has_more=next_cursor is not None,
     )
 
 
@@ -64,11 +82,10 @@ async def get_node(
     node_id: str,
     session: GraphSession = Depends(get_session),
 ):
-    """Get a single node by ID."""
     node = await asyncio.to_thread(session.get_node, node_id)
     if node is None:
-        raise KeyError(node_id)
-    return _node_dict_to_response(node)
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
+    return _node_response(node)
 
 
 @router.get("/node/{node_id}/neighbors", response_model=list[NeighborResponse])
@@ -77,21 +94,18 @@ async def get_neighbors(
     depth: int = Query(1, ge=1, le=5),
     session: GraphSession = Depends(get_session),
 ):
-    """Get neighbours of a node via BFS traversal."""
     neighbors = await asyncio.to_thread(session.get_neighbors, node_id, depth)
     return [
         NeighborResponse(
-            id=nb.get("id", ""),
-            type=nb.get("type", ""),
-            content=nb.get("content", ""),
-            relationship=nb.get("relationship", ""),
-            weight=nb.get("weight", 1.0),
-            hop=nb.get("hop", 1),
+            id=neighbor.get("id", ""),
+            type=neighbor.get("type", ""),
+            content=neighbor.get("content", ""),
+            relationship=neighbor.get("relationship", ""),
+            weight=neighbor.get("weight", 1.0),
+            hop=neighbor.get("hop", 1),
         )
-        for nb in neighbors
+        for neighbor in neighbors
     ]
-
-
 
 
 @router.get("/edges", response_model=EdgeListResponse)
@@ -100,28 +114,32 @@ async def list_edges(
     source: Optional[str] = Query(None, description="Filter by source node ID"),
     target: Optional[str] = Query(None, description="Filter by target node ID"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=5000),
+    cursor: Optional[str] = Query(None, description="Opaque cursor for forward pagination"),
     session: GraphSession = Depends(get_session),
 ):
-    """List edges with optional filtering and pagination."""
-    edges, total = await asyncio.to_thread(
-        session.get_edges, edge_type=type, source=source, target=target, skip=skip, limit=limit
+    edges, total, next_cursor = await asyncio.to_thread(
+        session.paginate_edges,
+        edge_type=type,
+        source=source,
+        target=target,
+        skip=skip,
+        limit=limit,
+        cursor=cursor,
     )
     return EdgeListResponse(
-        edges=[
-            EdgeResponse(
-                source=e.get("source", ""),
-                target=e.get("target", ""),
-                type=e.get("type", ""),
-                weight=e.get("weight", 1.0),
-                properties=e.get("metadata", {}),
-            )
-            for e in edges
-        ],
+        edges=[_edge_response(edge) for edge in edges],
         total=total,
         skip=skip,
         limit=limit,
+        next_cursor=next_cursor,
+        has_more=next_cursor is not None,
     )
+
+
+class _PathAlgorithm(str, Enum):
+    bfs = "bfs"
+    dijkstra = "dijkstra"
 
 
 
@@ -130,42 +148,44 @@ async def list_edges(
 async def find_path(
     node_id: str,
     target: str = Query(..., description="Target node ID"),
-    algorithm: str = Query("bfs", description="Algorithm: bfs, dijkstra"),
+    algorithm: _PathAlgorithm = Query(_PathAlgorithm.bfs, description="Algorithm: bfs or dijkstra"),
+    directed: bool = Query(True, description="If false, treat edges as undirected for traversal"),
     session: GraphSession = Depends(get_session),
 ):
-    """Find a path between two nodes."""
-    pf = session.path_finder
-    if pf is None:
-        raise ValueError("PathFinder not available — KG extras may not be installed.")
+    path_finder = session.path_finder
+    if path_finder is None:
+        raise HTTPException(status_code=503, detail="PathFinder not available; KG extras may not be installed.")
 
-    graph_data = await asyncio.to_thread(_build_graph_dict, session)
-
-    result = await asyncio.to_thread(
-        pf.find_shortest_path, graph_data, node_id, target
+    graph_dict = await asyncio.to_thread(session.build_graph_dict)
+    path_fn = (
+        path_finder.dijkstra_shortest_path
+        if algorithm == _PathAlgorithm.dijkstra
+        else path_finder.bfs_shortest_path
     )
-
-    path_nodes = result.get("path", []) if isinstance(result, dict) else []
-    graph_data = await asyncio.to_thread(session.build_graph_dict)
-
-    # Select algorithm: dijkstra for weighted shortest path, bfs otherwise.
-    if algorithm.lower() == "dijkstra":
-        path_fn = pf.dijkstra_shortest_path
-    else:
-        path_fn = pf.bfs_shortest_path
-
-    result = await asyncio.to_thread(path_fn, graph_data, node_id, target)
+    try:
+        result = await asyncio.to_thread(path_fn, graph_dict, node_id, target, directed=directed)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"No path found from '{node_id}' to '{target}': {exc}")
 
     path_nodes = result.get("path", []) if isinstance(result, dict) else (result or [])
-    total_weight = result.get("total_weight", 0.0) if isinstance(result, dict) else 0.0
+    if not path_nodes:
+        raise HTTPException(status_code=404, detail=f"No path found from '{node_id}' to '{target}'")
 
+    total_weight = result.get("total_weight", 0.0) if isinstance(result, dict) else 0.0
+    edge_ids = await asyncio.to_thread(session.resolve_path_edge_ids, path_nodes)
+
+    hop_count = len(path_nodes) - 1 if path_nodes else 0
     return PathResponse(
         source=node_id,
         target=target,
-        algorithm=algorithm,
+        algorithm=algorithm.value,
         path=path_nodes,
+        edge_ids=edge_ids,
         total_weight=total_weight,
+        directed=directed,
+        hop_count=hop_count,
+        distance_band=classify_path_distance(hop_count),
     )
-
 
 
 @router.post("/search", response_model=SearchResultResponse)
@@ -173,50 +193,17 @@ async def search_nodes(
     body: SearchRequest,
     session: GraphSession = Depends(get_session),
 ):
-    """Keyword search over graph nodes."""
-    results = await asyncio.to_thread(session.search, body.query, body.limit)
+    results = await asyncio.to_thread(session.search, body.query, body.limit, body.filters)
     items = [
-        SearchResultItem(
-            node=_node_dict_to_response(r.get("node", {})),
-            score=r.get("score", 0.0),
-        )
-        for r in results
+        SearchResultItem(node=_node_response(result.get("node", {})), score=result.get("score", 0.0))
+        for result in results
     ]
     return SearchResultResponse(results=items, total=len(items), query=body.query)
-
 
 
 @router.get("/stats", response_model=GraphStatsResponse)
 async def graph_stats(
     session: GraphSession = Depends(get_session),
 ):
-    """Get graph-level statistics."""
     stats = await asyncio.to_thread(session.get_stats)
     return GraphStatsResponse(**stats)
-
-
-
-def _build_graph_dict(session: GraphSession) -> dict:
-    """Build a graph dict for analytics helpers (entities + relationships)."""
-    nodes, _ = session.get_nodes(skip=0, limit=999_999)
-    edges, _ = session.get_edges(skip=0, limit=999_999)
-    return {
-        "entities": [
-            {
-                "id": n.get("id"),
-                "type": n.get("type", "entity"),
-                "text": n.get("content", n.get("id", "")),
-                "metadata": n.get("metadata", {}),
-            }
-            for n in nodes
-        ],
-        "relationships": [
-            {
-                "source": e.get("source"),
-                "target": e.get("target"),
-                "type": e.get("type", "related_to"),
-                "metadata": e.get("metadata", {}),
-            }
-            for e in edges
-        ],
-    }

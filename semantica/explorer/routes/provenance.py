@@ -62,27 +62,31 @@ def _build_provenance(session: GraphSession, node_id: Optional[str] = None) -> d
         return {"nodes": [], "edges": []}
 
     graph = nx.DiGraph()
+    nodes = session.get_nodes()
+    edges = session.get_edges()
+    nodes_by_id = {node.id: node for node in nodes}
+
+    if not node_id or node_id not in nodes_by_id:
+        return {"nodes": [], "edges": []}
+
+    graph = nx.DiGraph()
     graph.add_node(node_id)
 
     hop_nodes = {node_id}
-    for edge in session.graph.edges:
+    for edge in edges:
         if edge.source_id == node_id or edge.target_id == node_id:
             graph.add_edge(edge.source_id, edge.target_id, label=edge.edge_type)
             hop_nodes.add(edge.source_id)
             hop_nodes.add(edge.target_id)
 
-    for edge in session.graph.edges:
+    for edge in edges:
         if edge.source_id in hop_nodes or edge.target_id in hop_nodes:
             graph.add_edge(edge.source_id, edge.target_id, label=edge.edge_type)
 
-<<<<<<< HEAD
     subgraph = nx.ego_graph(graph, node_id, radius=2, undirected=True)
-=======
-    subgraph = nx.ego_graph(graph, node_id, radius=2, undirected=False)
->>>>>>> upstream/main
     provenance_nodes: List[Dict[str, Any]] = []
     for graph_node_id in subgraph.nodes():
-        node = session.graph.nodes.get(graph_node_id)
+        node = nodes_by_id.get(graph_node_id)
         if node is None:
             continue
         prov_type, parent_id = _classify_prov(node.node_type)

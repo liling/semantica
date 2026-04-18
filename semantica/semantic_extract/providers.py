@@ -939,16 +939,17 @@ class DeepSeekProvider(BaseProvider):
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat", **kwargs):
         super().__init__(**kwargs)
         self.api_key = api_key or config.get_api_key("deepseek")
+        self.base_url = "https://api.deepseek.com/v1"
         self.model = model
         self.client = None
         self._init_client()
 
     def _init_client(self):
         try:
-            import deepseek  # type: ignore[import-untyped]
+            from openai import OpenAI
 
             if self.api_key:
-                self.client = deepseek.Client(api_key=self.api_key)
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         except (ImportError, OSError):
             self.client = None
             self.logger.warning(

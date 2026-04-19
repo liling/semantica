@@ -19,7 +19,12 @@ from .ws import ConnectionManager
 
 
 def _install_mutation_bridge(app: FastAPI, session: GraphSession) -> None:
+    previous_callback = getattr(session.graph, "mutation_callback", None)
+
     def on_mutation(event_type: str, entity_id: str, payload: dict) -> None:
+        session.handle_graph_mutation(event_type, entity_id, payload)
+        if callable(previous_callback):
+            previous_callback(event_type, entity_id, payload)
         loop = getattr(app.state, "event_loop", None)
         manager = getattr(app.state, "ws_manager", None)
         if loop is None or manager is None or loop.is_closed():
@@ -149,6 +154,17 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
             "version": __version__,
             "status": "active",
         }
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        index_path = Path(__file__).resolve().parent.parent / "static" / "index.html"
+        if index_path.is_file():
+            return FileResponse(index_path)
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta charset="UTF-8">'
+            '<title>Semantica Knowledge Explorer</title></head>'
+            '<body><div id="root"></div></body></html>'
+        )
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.is_dir():

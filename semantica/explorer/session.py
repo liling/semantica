@@ -4,12 +4,15 @@ Semantica Explorer session helpers.
 
 import base64
 import json
+import logging
 import threading
+import time
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 from ..context.context_graph import ContextGraph, _resolve_edge_identity
+from .search_index import GraphSearchIndex
 
 _KG_AVAILABLE = False
 try:
@@ -28,6 +31,8 @@ try:
 except ImportError:
     pass
 
+logger = logging.getLogger(__name__)
+
 
 class GraphSession:
     """Thread-safe session wrapper around a loaded ``ContextGraph``."""
@@ -35,6 +40,7 @@ class GraphSession:
     def __init__(self, graph: ContextGraph) -> None:
         self.graph = graph
         self._lock = threading.RLock()
+        self._search_index = GraphSearchIndex()
 
         self.annotations: Dict[str, Dict[str, Any]] = {}
 
@@ -46,6 +52,7 @@ class GraphSession:
         self._similarity: Any = None
         self._link_predictor: Any = None
         self._validator: Any = None
+        self.rebuild_search_index()
 
     @classmethod
     def from_file(cls, path: str) -> "GraphSession":
@@ -390,6 +397,28 @@ class GraphSession:
         with self._lock:
             return self.graph.get_neighbors(node_id, hops=depth)
 
+    def rebuild_search_index(self) -> None:
+        with self._lock:
+            normalized_nodes = [
+                self.normalize_node(node.to_dict())
+                for node in self.graph.nodes.values()
+                if node is not None
+            ]
+        self._search_index.rebuild(normalized_nodes)
+
+    def handle_graph_mutation(self, event_type: str, entity_id: str, payload: Dict[str, Any]) -> None:
+        normalized_event = str(event_type or "").upper()
+        if normalized_event in {"ADD_NODE", "UPDATE_NODE"}:
+            normalized_node = self.normalize_node(payload or {})
+            if normalized_node.get("id"):
+                with self._lock:
+                    self._search_index.upsert(normalized_node)
+        elif normalized_event in {"REMOVE_NODE", "DELETE_NODE"}:
+            with self._lock:
+                self._search_index.remove(str(entity_id))
+        elif normalized_event in {"RELOAD_GRAPH", "RESET_GRAPH"}:
+            self.rebuild_search_index()
+
     def search(
         self,
         query: str,
@@ -397,64 +426,34 @@ class GraphSession:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         filters = filters or {}
-        try:
-            with self._lock:
-                raw = self.graph.query(query)[:limit]
-        except Exception:
-            raw = []
+        started_at = time.perf_counter()
+        matches, diagnostics = self._search_index.search(query, limit=limit, filters=filters)
 
-        if not raw:
-            nodes, _ = self.get_nodes(search=query, skip=0, limit=max(limit * 5, limit))
-            scored = []
-            lowered_query = query.lower().strip()
-            for node in nodes:
-                haystacks = [
-                    str(node.get("id", "")),
-                    str(node.get("content", "")),
-                    json.dumps(node.get("properties", {}), default=str),
-                ]
-                best_score = 0.0
-                for haystack in haystacks:
-                    lowered = haystack.lower()
-                    if lowered == lowered_query:
-                        best_score = max(best_score, 1.0)
-                    elif lowered_query in lowered:
-                        best_score = max(best_score, min(0.9, len(lowered_query) / max(len(lowered), 1)))
-                if best_score > 0:
-                    scored.append({"node": node, "score": round(best_score, 4)})
-            raw = sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
-
-        normalized = []
-        for result in raw:
-            result_node = result.get("node", {})
-            node = (
-                self.normalize_node(result_node)
-                if "properties" in result_node or "metadata" in result_node or "content" in result_node
-                else result_node
-            )
-
-            filter_type = filters.get("type") or filters.get("node_type")
-            if filter_type and node["type"] != filter_type:
-                continue
-
-            min_confidence = self._coerce_float(filters.get("min_confidence"))
-            node_confidence = self._coerce_float(node["properties"].get("confidence"))
-            if min_confidence is not None and (
-                node_confidence is None or node_confidence < min_confidence
-            ):
-                continue
-
-            tags_filter = filters.get("tags")
-            if tags_filter:
-                node_tags = node["properties"].get("tags") or []
-                if isinstance(node_tags, str):
-                    node_tags = [node_tags]
-                if not set(tags_filter).issubset(set(node_tags)):
+        normalized_results: List[Dict[str, Any]] = []
+        with self._lock:
+            for node_id, score in matches:
+                raw_node = self.graph.find_node(node_id)
+                if raw_node is None:
                     continue
+                node_payload = raw_node.to_dict() if hasattr(raw_node, "to_dict") else raw_node
+                normalized_results.append(
+                    {
+                        "node": self.normalize_node(node_payload),
+                        "score": score,
+                    }
+                )
 
-            normalized.append({"node": node, "score": result.get("score", 0.0)})
-
-        return normalized[:limit]
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        logger.debug(
+            "Explorer search query=%r limit=%s cache_hit=%s path=%s candidates=%s duration_ms=%s",
+            query,
+            limit,
+            diagnostics.get("cache_hit"),
+            diagnostics.get("path"),
+            diagnostics.get("candidates"),
+            duration_ms,
+        )
+        return normalized_results[:limit]
 
     def get_stats(self) -> Dict[str, Any]:
         with self._lock:
@@ -594,8 +593,51 @@ class GraphSession:
 
     def add_nodes(self, nodes: List[Dict[str, Any]]) -> int:
         with self._lock:
-            return self.graph.add_nodes(nodes)
+            added = self.graph.add_nodes(nodes)
+            has_mutation_callback = callable(getattr(self.graph, "mutation_callback", None))
+        if added and not has_mutation_callback:
+            self.rebuild_search_index()
+        return added
 
     def add_edges(self, edges: List[Dict[str, Any]]) -> int:
         with self._lock:
-            return self.graph.add_edges(edges)
+            added = self.graph.add_edges(edges)
+            has_mutation_callback = callable(getattr(self.graph, "mutation_callback", None))
+        if added and not has_mutation_callback:
+            self.rebuild_search_index()
+        return added
+
+    def add_node(
+        self,
+        node_id: str,
+        node_type: str,
+        content: Optional[str] = None,
+        **properties: Any,
+    ) -> bool:
+        with self._lock:
+            added = self.graph.add_node(node_id, node_type, content=content, **properties)
+            has_mutation_callback = callable(getattr(self.graph, "mutation_callback", None))
+        if added and not has_mutation_callback:
+            normalized = self.get_node(node_id)
+            if normalized is not None:
+                self._search_index.upsert(normalized)
+        return added
+
+    def add_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        edge_type: str = "related_to",
+        weight: float = 1.0,
+        **properties: Any,
+    ) -> bool:
+        with self._lock:
+            added = self.graph.add_edge(
+                source_id,
+                target_id,
+                edge_type=edge_type,
+                weight=weight,
+                **properties,
+            )
+            has_mutation_callback = callable(getattr(self.graph, "mutation_callback", None))
+        return added

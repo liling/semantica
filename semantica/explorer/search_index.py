@@ -180,8 +180,7 @@ class GraphSearchIndex:
             for length in range(self.prefix_min_length, min(len(token), self.prefix_max_length) + 1):
                 self._prefix_index[token[:length]].add(node_id)
 
-        if node_id not in self._documents:
-            bisect.insort(self._ordered_node_ids, node_id)
+        bisect.insort(self._ordered_node_ids, node_id)
 
         if clear_cache:
             self.clear_cache()

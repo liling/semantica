@@ -305,6 +305,23 @@ class TestSearchAndStats:
         assert "metformin" in result_ids
         assert "metformin_hcl" in result_ids
 
+    def test_search_secondary_scan_fallback_matches_non_curated_properties(self, client):
+        session = client.app.state.session
+        assert session.add_node(
+            "fallback_node",
+            "entity",
+            content="Alpha",
+            description="rareterm",
+        )
+
+        response = client.post(
+            "/api/graph/search",
+            json={"query": "rareterm", "limit": 10},
+        )
+        assert response.status_code == 200
+        result_ids = [item["node"]["id"] for item in response.json()["results"]]
+        assert "fallback_node" in result_ids
+
     def test_stats(self, client):
         response = client.get("/api/graph/stats")
         assert response.status_code == 200

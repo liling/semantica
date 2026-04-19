@@ -288,3 +288,23 @@ class MergeResponse(BaseModel):
     merged_into: str
     removed_ids: List[str]
     edges_updated: int
+
+
+class ProvenanceNode(BaseModel):
+    id: str
+    label: str
+    prov_type: str
+    parent_id: Optional[str] = None
+
+
+class ProvenanceEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    label: str
+    direction: str
+
+
+class ProvenanceResponse(BaseModel):
+    nodes: List[ProvenanceNode]
+    edges: List[ProvenanceEdge]

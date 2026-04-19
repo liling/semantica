@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Performance: Indexed search for large knowledge graphs** (closes #467, PR #481 by @ZohaibHassan16, review fixes by @KaifAhmad1):
+  - **Root cause**: The previous `GraphSession.search()` ran a full O(n) scan over all nodes per query, serializing every node's properties to JSON for string matching. On a 118 k-node graph warm queries took 24–471 ms; a session with 500 k nodes was effectively unusable.
+  - **New `semantica/explorer/search_index.py`**: Purpose-built in-memory inverted index with three lookup tiers — exact-term index (full normalized strings), token index (individual words), and prefix index (2–12 character prefixes of every token). A linear secondary-scan fallback (capped at 12 k nodes) handles queries that miss all three tiers. An LRU result cache (128 slots, `OrderedDict`) serves repeat queries at zero cost. Warm query times on the same 118 k-node graph: 24 ms → 0.004 ms (exact), 471 ms → 0.009 ms (ID lookup), 475 ms → 0.002 ms (no-match).
+  - **`IndexedNodeDocument`** frozen dataclass stores per-node primary text (ID, content, curated alias keys: `label`, `name`, `pref_label`, `aliases`, `synonyms`, `display_name`, etc.), secondary text (remaining properties), token set, prefix expansions, confidence, and tags. Primary text prioritizes human-readable fields; secondary text covers the full property bag up to a 48-fragment cap.
+  - **Scoring**: exact ID match → 140, exact term → 120, primary-text substring → 78 + length bonus, token hit → 18, prefix hit → 10, multi-token bonus → 4 per hit. Ties broken deterministically on `(score, exactness, token_hits, node_id)`.
+  - **Mutation sync**: `GraphSession.add_node()`, `add_nodes()`, `add_edges()` and `add_node()` update the index incrementally. `handle_graph_mutation()` integrates with the WebSocket mutation bridge for live updates during reasoning, enrichment, and remote graph changes. `rebuild_search_index()` performs a full O(n) rebuild when needed (session init, merge, reload). `enrich.py` routes node/edge additions through `session.add_node`/`session.add_edge` so reasoning-inferred nodes are indexed immediately.
+  - **Review fixes applied**: replaced `list.sort()` per upsert with `bisect.insort()` (O(log n) vs O(n log n)); replaced `list.remove()` with `bisect.bisect_left` + `pop()` (O(log n) vs O(n)); added `with self._lock` in `handle_graph_mutation()` to prevent index races from the WebSocket thread; removed unnecessary source/target upserts on `add_edge()` (edges don't affect node text); sorted tag values in `_cache_key()` so `["a","b"]` and `["b","a"]` share a cache entry.
+  - 3 new tests: `test_search_exact_and_prefix` (exact match + prefix match), `test_search_filters_and_cache_stability` (type + confidence filter, identical repeated requests), `test_search_sees_new_nodes_after_mutation` (node added via `session.add_node()` immediately visible in search).
+
 - **Security: 12 vulnerability fixes across CRITICAL → LOW severity** (PR `security-enhancement` by @KaifAhmad1):
 
   **Critical**

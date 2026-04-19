@@ -67,6 +67,9 @@ class PathResponse(BaseModel):
     path: List[str]
     edge_ids: List[str] = Field(default_factory=list)
     total_weight: float = 0.0
+    directed: bool = True
+    hop_count: int = 0
+    distance_band: str = "direct"
 
 
 class GraphStatsResponse(BaseModel):
@@ -285,3 +288,23 @@ class MergeResponse(BaseModel):
     merged_into: str
     removed_ids: List[str]
     edges_updated: int
+
+
+class ProvenanceNode(BaseModel):
+    id: str
+    label: str
+    prov_type: str
+    parent_id: Optional[str] = None
+
+
+class ProvenanceEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    label: str
+    direction: str
+
+
+class ProvenanceResponse(BaseModel):
+    nodes: List[ProvenanceNode]
+    edges: List[ProvenanceEdge]

@@ -6,8 +6,9 @@ import asyncio
 from enum import Enum
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ...utils.helpers import classify_path_distance
 from ..dependencies import get_session
 from ..schemas import (
     EdgeListResponse,
@@ -83,7 +84,7 @@ async def get_node(
 ):
     node = await asyncio.to_thread(session.get_node, node_id)
     if node is None:
-        raise KeyError(node_id)
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     return _node_response(node)
 
 
@@ -141,16 +142,19 @@ class _PathAlgorithm(str, Enum):
     dijkstra = "dijkstra"
 
 
+
+
 @router.get("/node/{node_id}/path", response_model=PathResponse)
 async def find_path(
     node_id: str,
     target: str = Query(..., description="Target node ID"),
     algorithm: _PathAlgorithm = Query(_PathAlgorithm.bfs, description="Algorithm: bfs or dijkstra"),
+    directed: bool = Query(True, description="If false, treat edges as undirected for traversal"),
     session: GraphSession = Depends(get_session),
 ):
     path_finder = session.path_finder
     if path_finder is None:
-        raise ValueError("PathFinder not available; KG extras may not be installed.")
+        raise HTTPException(status_code=503, detail="PathFinder not available; KG extras may not be installed.")
 
     graph_dict = await asyncio.to_thread(session.build_graph_dict)
     path_fn = (
@@ -158,12 +162,19 @@ async def find_path(
         if algorithm == _PathAlgorithm.dijkstra
         else path_finder.bfs_shortest_path
     )
-    result = await asyncio.to_thread(path_fn, graph_dict, node_id, target)
+    try:
+        result = await asyncio.to_thread(path_fn, graph_dict, node_id, target, directed=directed)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"No path found from '{node_id}' to '{target}': {exc}")
 
     path_nodes = result.get("path", []) if isinstance(result, dict) else (result or [])
+    if not path_nodes:
+        raise HTTPException(status_code=404, detail=f"No path found from '{node_id}' to '{target}'")
+
     total_weight = result.get("total_weight", 0.0) if isinstance(result, dict) else 0.0
     edge_ids = await asyncio.to_thread(session.resolve_path_edge_ids, path_nodes)
 
+    hop_count = len(path_nodes) - 1 if path_nodes else 0
     return PathResponse(
         source=node_id,
         target=target,
@@ -171,6 +182,9 @@ async def find_path(
         path=path_nodes,
         edge_ids=edge_ids,
         total_weight=total_weight,
+        directed=directed,
+        hop_count=hop_count,
+        distance_band=classify_path_distance(hop_count),
     )
 
 

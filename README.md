@@ -14,6 +14,7 @@
 [![CI](https://github.com/Hawksight-AI/semantica/workflows/CI/badge.svg)](https://github.com/Hawksight-AI/semantica/actions)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/sV34vps5hH)
 [![X](https://img.shields.io/badge/X-Follow%20Semantica-black?logo=x&logoColor=white)](https://x.com/BuildSemantica)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-Plugin-FF3B30?logo=github&logoColor=white)](https://openclaw.ai)
 
 ### ⭐ Give us a Star · 🍴 Fork us · 💬 Join our Discord · 🐦 Follow on X
 
@@ -45,7 +46,7 @@ Semantica is the **context and intelligence layer** you add on top of your exist
 - ✅ **Reasoning Engines** — forward chaining, Rete networks, deductive, abductive, and SPARQL. Explainable paths, not black boxes.
 - ✅ **Quality & Deduplication** — conflict detection, entity resolution, and pipeline validation built in.
 
-> Works alongside LangChain, LlamaIndex, AutoGen, CrewAI, and any LLM — Semantica is the **accountability layer** on top, not a replacement.
+> Works alongside **Agno** and any LLM — Semantica is the **accountability layer** on top, not a replacement. LangChain, LangGraph, CrewAI, and more coming soon.
 
 ```bash
 pip install semantica
@@ -53,17 +54,314 @@ pip install semantica
 
 ---
 
-## Plugins (Claude, Cursor, Codex)
+## 🔌 Works With Every AI Tool
 
-Semantica includes a cross-platform plugin bundle under `plugins/` for community use:
+Semantica ships **native plugin bundles** for Claude Code, Cursor, and Codex, an **MCP server** (`python -m semantica.mcp_server`) for Windsurf, Cline, Continue, VS Code, Claude Desktop, and OpenClaw, and a **REST API** (FastAPI, port 8000) for any other tool.
 
-- 17 domain skills (context graphs, decision intelligence, explainability, reasoning, provenance, ontology, temporal, visualization)
-- Specialized agents (`decision-advisor`, `explainability`, `kg-assistant`)
-- Hook configuration and platform-specific manifests for Claude, Cursor, and Codex
+<table>
 
-See the community setup guide:
+<!-- ── Native Plugin Bundle ──────────────────────────────────────────── -->
+<tr>
+<th colspan="3" align="left">🔌 Native Plugin Bundle</th>
+<th colspan="5" align="left">⚡ MCP Server + Plugin</th>
+</tr>
+<tr>
+<td align="center" width="12.5%">
+<a href="https://claude.com/product/claude-code"><img src="https://github.com/anthropics.png?size=120" alt="Claude Code" width="48" height="48" /></a><br/>
+<strong>Claude Code</strong><br/>
+<sub>17 skills · 3 agents · hooks</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://cursor.com"><img src="https://www.freelogovectors.net/wp-content/uploads/2025/06/cursor-logo-freelogovectors.net_.png" alt="Cursor" width="48" height="48" /></a><br/>
+<strong>Cursor</strong><br/>
+<sub>17 skills · 3 agents</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/openai/codex"><img src="https://github.com/openai.png?size=120" alt="Codex CLI" width="48" height="48" /></a><br/>
+<strong>Codex CLI</strong><br/>
+<sub>17 skills · 3 agents</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://windsurf.com"><img src="https://exafunction.github.io/public/brand/windsurf-black-symbol.svg" alt="Windsurf" width="48" height="48" /></a><br/>
+<strong>Windsurf</strong><br/>
+<sub><a href="plugins/.windsurf-plugin/">plugin</a></sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/cline/cline"><img src="https://github.com/cline.png?size=120" alt="Cline" width="48" height="48" /></a><br/>
+<strong>Cline</strong><br/>
+<sub><a href="plugins/.cline-plugin/">plugin</a></sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/continuedev/continue"><img src="https://github.com/continuedev.png?size=120" alt="Continue" width="48" height="48" /></a><br/>
+<strong>Continue</strong><br/>
+<sub><a href="plugins/.continue-plugin/">plugin</a></sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/microsoft/vscode"><img src="https://github.com/microsoft.png?size=120" alt="VS Code" width="48" height="48" /></a><br/>
+<strong>VS Code</strong><br/>
+<sub><a href="plugins/.vscode-plugin/">plugin</a></sub>
+</td>
+<td align="center" width="12.5%">
+<a href="integrations/openclaw/"><img src="https://github.com/openclaw.png?size=120" alt="OpenClaw" width="48" height="48" /></a><br/>
+<strong>OpenClaw</strong><br/>
+<sub>MCP + <a href="integrations/openclaw/">plugin</a></sub>
+</td>
+</tr>
 
-- [`plugins/.claude-plugin/README.md`](plugins/.claude-plugin/README.md)
+<!-- ── MCP Server only · REST API ───────────────────────────────────── -->
+<tr>
+<th colspan="1" align="left">☁️ MCP Server</th>
+<th colspan="7" align="left">🌐 REST API</th>
+</tr>
+<tr>
+<td align="center" width="12.5%">
+<a href="https://claude.ai/download"><img src="https://github.com/anthropics.png?size=120" alt="Claude Desktop" width="48" height="48" /></a><br/>
+<strong>Claude Desktop</strong><br/>
+<sub>MCP server</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/features/copilot"><img src="https://github.com/github.png?size=120" alt="GitHub Copilot" width="48" height="48" /></a><br/>
+<strong>GitHub Copilot</strong><br/>
+<sub>REST API</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/RooCodeInc/Roo-Code"><img src="https://github.com/RooCodeInc.png?size=120" alt="Roo Code" width="48" height="48" /></a><br/>
+<strong>Roo Code</strong><br/>
+<sub>REST API</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/block/goose"><img src="https://github.com/block.png?size=120" alt="Goose" width="48" height="48" /></a><br/>
+<strong>Goose</strong><br/>
+<sub>REST API</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/Kilo-Org/kilocode"><img src="https://github.com/Kilo-Org.png?size=120" alt="Kilo Code" width="48" height="48" /></a><br/>
+<strong>Kilo Code</strong><br/>
+<sub>REST API</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/Aider-AI/aider"><img src="https://github.com/Aider-AI.png?size=120" alt="Aider" width="48" height="48" /></a><br/>
+<strong>Aider</strong><br/>
+<sub>REST API</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/aws/amazon-q-developer-cli"><img src="https://github.com/aws.png?size=120" alt="Amazon Q" width="48" height="48" /></a><br/>
+<strong>Amazon Q</strong><br/>
+<sub>REST API</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://zed.dev"><img src="https://github.com/zed-industries.png?size=120" alt="Zed" width="48" height="48" /></a><br/>
+<strong>Zed</strong><br/>
+<sub>REST API</sub>
+</td>
+</tr>
+
+<!-- ── Any tool via REST ─────────────────────────────────────────────── -->
+<tr>
+<th colspan="8" align="left">🔧 Any Tool</th>
+</tr>
+<tr>
+<td align="center" colspan="8">
+<img src="https://img.shields.io/badge/109-endpoints-1f6feb?style=flat-square" alt="REST API" width="48" /><br/>
+<strong>Any agent</strong><br/>
+<sub>109 REST endpoints · FastAPI · port 8000</sub>
+</td>
+</tr>
+
+</table>
+
+### Agentic Frameworks
+
+Semantica integrates with **Agno** today. Coming soon: LangChain, LangGraph, CrewAI, LlamaIndex, AutoGen, OpenAI Agents SDK, Google ADK, and more.
+
+<table>
+<tr>
+<th colspan="8" align="left">✅ Supported</th>
+</tr>
+<tr>
+<td align="center" width="12.5%">
+<a href="https://github.com/agno-agi/agno"><img src="https://github.com/agno-agi.png?size=120" alt="Agno" width="48" height="48" /></a><br/>
+<strong>Agno</strong><br/>
+<sub>First-class · <code>pip install semantica[agno]</code></sub>
+</td>
+</tr>
+<tr>
+<th colspan="8" align="left">🔜 Coming Soon</th>
+</tr>
+<tr>
+<td align="center" width="12.5%">
+<a href="https://github.com/langchain-ai/langchain"><img src="https://github.com/langchain-ai.png?size=120" alt="LangChain" width="48" height="48" /></a><br/>
+<strong>LangChain</strong><br/>
+<sub>Coming soon</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/langchain-ai/langgraph"><img src="https://github.com/langchain-ai.png?size=120" alt="LangGraph" width="48" height="48" /></a><br/>
+<strong>LangGraph</strong><br/>
+<sub>Coming soon</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/crewAIInc/crewAI"><img src="https://github.com/crewAIInc.png?size=120" alt="CrewAI" width="48" height="48" /></a><br/>
+<strong>CrewAI</strong><br/>
+<sub>Coming soon</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/run-llama/llama_index"><img src="https://github.com/run-llama.png?size=120" alt="LlamaIndex" width="48" height="48" /></a><br/>
+<strong>LlamaIndex</strong><br/>
+<sub>Coming soon</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/microsoft/autogen"><img src="https://github.com/microsoft.png?size=120" alt="AutoGen" width="48" height="48" /></a><br/>
+<strong>AutoGen</strong><br/>
+<sub>Coming soon</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/openai/openai-agents-python"><img src="https://github.com/openai.png?size=120" alt="OpenAI Agents SDK" width="48" height="48" /></a><br/>
+<strong>OpenAI Agents</strong><br/>
+<sub>Coming soon</sub>
+</td>
+<td align="center" width="12.5%">
+<a href="https://github.com/google/adk-python"><img src="https://github.com/google.png?size=120" alt="Google ADK" width="48" height="48" /></a><br/>
+<strong>Google ADK</strong><br/>
+<sub>Coming soon</sub>
+</td>
+</tr>
+</table>
+
+> **Agno — First-Class Integration** · `pip install semantica[agno]`
+>
+> Five integration modules live in [`integrations/agno/`](integrations/agno/):
+>
+> | Module | Class | What it does |
+> |---|---|---|
+> | `context_store.py` | `AgnoContextStore` | Graph-backed agent memory — store and retrieve structured context |
+> | `knowledge_graph.py` | `AgnoKnowledgeGraph` | Implements Agno's `AgentKnowledge` protocol; full extraction pipeline |
+> | `decision_kit.py` | `AgnoDecisionKit` | 6 decision-intelligence tools for Agno agents |
+> | `kg_toolkit.py` | `AgnoKGToolkit` | 7 KG pipeline tools (build, query, enrich, export) |
+> | `shared_context.py` | `AgnoSharedContext` | Shared context graph for multi-agent team coordination |
+
+### Plugin Bundles (Claude Code · Cursor · Codex)
+
+Native plugin bundles live under [`plugins/`](plugins/). Each directory contains a `plugin.json`, `marketplace.json`, and `README.md`.
+
+| Bundle | Directory | Tools |
+|---|---|---|
+| Claude Code | [`plugins/.claude-plugin/`](plugins/.claude-plugin/) | 17 skills · 3 agents · hooks |
+| Cursor | [`plugins/.cursor-plugin/`](plugins/.cursor-plugin/) | 17 skills · 3 agents · hooks |
+| Codex CLI | [`plugins/.codex-plugin/`](plugins/.codex-plugin/) | 17 skills · 3 agents |
+| Windsurf | [`plugins/.windsurf-plugin/`](plugins/.windsurf-plugin/) | 17 skills · 3 agents · MCP config |
+| Cline | [`plugins/.cline-plugin/`](plugins/.cline-plugin/) | 17 skills · 3 agents · MCP config |
+| Continue | [`plugins/.continue-plugin/`](plugins/.continue-plugin/) | 17 skills · 3 agents · MCP config |
+| VS Code | [`plugins/.vscode-plugin/`](plugins/.vscode-plugin/) | 17 skills · 3 agents · MCP config |
+| OpenClaw | [`plugins/.openclaw-plugin/`](plugins/.openclaw-plugin/) | 17 skills · 3 agents · MCP config |
+
+**17 domain skills:**
+
+| Skill | What it does |
+|---|---|
+| `extract` | Full semantic extraction pipeline: NER, relations, events, coreference, triplets |
+| `ingest` | Data ingestion from files, databases, APIs, streams, and MCP servers |
+| `query` | SPARQL, Cypher, keyword search, structured graph patterns |
+| `ontology` | Schema management, concepts, relationships, alignments |
+| `validate` | Pipeline, extraction, schema, and ontology validation |
+| `deduplicate` | Duplicate detection and entity merging with fuzzy matching |
+| `embed` | Node2Vec embeddings, similarity scoring, link prediction |
+| `reason` | Deductive, abductive, Datalog, SPARQL, and Rete reasoning engines |
+| `decision` | Record, query, and analyze decisions; find precedents; causal analysis |
+| `causal` | Cause-effect chains, interventions, counterfactuals, causal influence |
+| `temporal` | Point-in-time queries, snapshots, timelines, temporal causal analysis |
+| `provenance` | Data lineage, source attribution, audit trails |
+| `policy` | Policy definition, enforcement, compliance checks, access control |
+| `explain` | Decision logic transparency, causal context, audit-ready explanations |
+| `export` | Multi-format export: JSON, RDF, Parquet, CSV, GraphML |
+| `change` | Graph change tracking, diffs, temporal updates, impact analysis |
+| `visualize` | Topology, centrality, communities, paths, embeddings, decision graphs |
+
+**3 specialized agents:**
+
+| Agent | Role |
+|---|---|
+| `kg-assistant` | General-purpose KG-aware assistant — knows all APIs and method signatures |
+| `decision-advisor` | Decision intelligence specialist: causal reasoning, precedents, policy violations |
+| `explainability` | Reasoning transparency specialist — generates audit-ready explanation reports |
+
+**Hooks** (`plugins/hooks/hooks.json`) — `PreToolUse` / `PostToolUse` matchers for syntax validation and automated warnings.
+
+→ [`plugins/.claude-plugin/README.md`](plugins/.claude-plugin/README.md)
+
+### MCP Server (expose Semantica to any MCP-aware tool)
+
+Semantica ships a full **MCP server** (`semantica/mcp_server.py`) — run it once and any MCP-compatible tool connects automatically:
+
+```bash
+python -m semantica.mcp_server
+```
+
+Add to your tool's config (Claude Desktop, Windsurf, Cline, Continue, VS Code, Roo Code):
+
+```json
+{
+  "mcpServers": {
+    "semantica": {
+      "command": "python",
+      "args": ["-m", "semantica.mcp_server"]
+    }
+  }
+}
+```
+
+**12 tools exposed:** `extract_entities`, `extract_relations`, `record_decision`, `query_decisions`, `find_precedents`, `get_causal_chain`, `add_entity`, `add_relationship`, `run_reasoning`, `get_graph_analytics`, `export_graph`, `get_graph_summary`
+
+**3 resources:** `semantica://graph/summary`, `semantica://decisions/list`, `semantica://schema/info`
+
+See [`plugins/.claude-plugin/README.md`](plugins/.claude-plugin/README.md) for per-tool config snippets.
+
+### MCP Client (Ingest from MCP Servers)
+
+Semantica also includes an **MCP client** (`semantica/ingest/mcp_client.py`) that lets you pull data from any Python/FastMCP server into a knowledge graph:
+
+```python
+from semantica.ingest import MCPClient
+
+client = MCPClient("http://your-mcp-server:8080")
+resources = client.list_resources()   # discover available resources
+data      = client.read_resource("resource://your-data")
+```
+
+Supported connection schemes: `http://`, `https://`, `mcp://`, `sse://` · JSON-RPC · auth support · dynamic capability discovery.
+
+---
+
+## 🖥️ Semantica Knowledge Explorer
+
+A real-time visual interface for exploring every dimension of your knowledge graph — built into the repo under [`explorer/`](explorer/).
+
+| Workspace | What you can do |
+|---|---|
+| **Knowledge Graph** | Pan, zoom, and inspect a live Sigma.js graph canvas with ForceAtlas2 layout |
+| **Timeline** | Scrub through temporal events and watch the graph evolve |
+| **Decisions** | Browse the causal chain behind every recorded decision with outcome badges |
+| **Registry** | Live audit log of every graph mutation — add-node, add-edge, merge, delete |
+| **Entity Resolution** | Review and merge duplicate entities detected by the deduplication engine |
+| **KG Overview** | Aggregate stats, community breakdown, centrality heatmap |
+| **Ontology** | SKOS/OWL vocabulary hierarchy and auto-generated schema summary |
+
+### Run locally
+
+```bash
+# 1. Start the Semantica backend (port 8000)
+python -m semantica.server
+
+# 2. In a second terminal
+cd explorer
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** — the Explorer connects automatically. All `/api` and `/ws` traffic is proxied to `127.0.0.1:8000` by Vite, so no CORS configuration is needed.
+
+> **Requirements:** Node 18+ · Python 3.8+ · npm 9+
+
+For the full setup guide, troubleshooting, and production build instructions see [`explorer/README.md`](explorer/README.md).
 
 ---
 
@@ -347,6 +645,7 @@ Semantic memory with hybrid search and metadata filtering.
 | `semantica.change_management` | Version storage, change tracking, checksums, audit trails, compliance support for KGs and ontologies |
 | `semantica.triplet_store` | RDF triplet store integration — Blazegraph, Jena, RDF4J; SPARQL queries and bulk loading |
 | `semantica.visualization` | Interactive and static visualization of KGs, ontologies, embeddings, analytics, and temporal graphs |
+| [`explorer/`](explorer/) | **Semantica Knowledge Explorer** — React 19 + Sigma.js UI: graph canvas, decision viewer, causal chains, entity resolution, ontology browser, and registry audit log |
 | `semantica.seed` | Seed data management for initial KG construction from CSV, JSON, databases, and APIs |
 | `semantica.core` | Framework orchestration, configuration management, knowledge base construction, plugin system |
 | `semantica.llms` | LLM provider integrations — Groq, OpenAI, Novita AI, HuggingFace, LiteLLM |
@@ -643,16 +942,13 @@ if result.valid:
 - **`semantica.triplet_store`** — Blazegraph, Jena, RDF4J; SPARQL, bulk loading, SKOS helpers
 - **`semantica.visualization`** — KG, ontology, embedding, and temporal graph visualization
 - **`semantica.llms`** — Groq, OpenAI, Novita AI, HuggingFace, LiteLLM
-
-
----
-
-## 🔌 Integrations
+- **[`explorer/`](explorer/)** — **Semantica Knowledge Explorer** — browser UI for live graph inspection, decisions, entity resolution, and ontology browsing (`npm run dev` in `explorer/`)
 
 ### Graph Databases
-- **AWS Neptune** — Amazon Neptune with IAM authentication
+- **Neo4j** — Cypher queries via `semantica.graph_store`
+- **FalkorDB** — native support; `DecisionQuery` and `CausalChainAnalyzer` work directly with FalkorDB row/header shapes
 - **Apache AGE** — PostgreSQL + openCypher via SQL
-- **FalkorDB** — native support for decision queries and causal analysis
+- **AWS Neptune** — Amazon Neptune with IAM authentication
 
 ### Vector Databases
 - **FAISS** — built-in, zero extra dependencies
@@ -668,22 +964,15 @@ if result.valid:
 - **Databases** — SQL via `DBIngestor`
 - **Snowflake** — table/query ingestion, pagination, password/key-pair/OAuth/SSO auth · `pip install semantica[db-snowflake]`
 - **Docling** — advanced table and layout extraction (PDF, DOCX, PPTX, XLSX)
+- **Email** — inbox ingestion via `EmailIngestor`
+- **Repositories** — Git repo ingestion for code graph construction
 
 ### LLM Providers
 - **LiteLLM** — 100+ models: OpenAI, Anthropic, Cohere, Mistral, Ollama, Azure, AWS Bedrock, and more
 - **Novita AI** — OpenAI-compatible (`deepseek/deepseek-v3.2` and more) · set `NOVITA_API_KEY`
-
-### Agentic Frameworks
-Semantica complements — not replaces — LangChain, LlamaIndex, AutoGen, CrewAI, Google ADK, and more.
-
-> **Agno — First-Class Integration** · `pip install semantica[agno]`
->
-> Five ready-to-use Agno components:
-> - `AgnoContextStore` — graph-backed agent memory
-> - `AgnoKnowledgeGraph` — multi-hop GraphRAG knowledge base
-> - `AgnoDecisionKit` — 6 decision-intelligence tools
-> - `AgnoKGToolkit` — 7 KG pipeline tools
-> - `AgnoSharedContext` — shared context graph for multi-agent teams
+- **Groq** — ultra-low latency inference · set `GROQ_API_KEY`
+- **HuggingFace** — local and hosted models via `HuggingFaceProvider`
+- **Ollama** — local models including remote server support
 
 ---
 

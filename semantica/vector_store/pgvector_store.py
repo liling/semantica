@@ -64,12 +64,18 @@ except (ImportError, OSError):
         PSYCOPG2_AVAILABLE = False
         psycopg2 = None
 
-# Optional pgvector import
+# Optional pgvector import — try psycopg3 adapter first, then psycopg2
 try:
     import pgvector
-    from pgvector.psycopg import register_vector
 
     PGVECTOR_AVAILABLE = True
+    try:
+        from pgvector.psycopg import register_vector
+    except ImportError:
+        try:
+            from pgvector.psycopg2 import register_vector
+        except ImportError:
+            register_vector = None
 except (ImportError, OSError):
     PGVECTOR_AVAILABLE = False
     pgvector = None
@@ -188,9 +194,12 @@ class PgVectorStore:
                 conn = self._pool.getconn()
             else:
                 conn = self._pool.getconn()
-            # Register pgvector adapters for this connection
+            # Register pgvector adapters for this connection (ignore if extension not yet installed)
             if register_vector:
-                register_vector(conn)
+                try:
+                    register_vector(conn)
+                except Exception:
+                    pass
             yield conn
         except (ValidationError, ProcessingError):
             # Re-raise framework exceptions without wrapping

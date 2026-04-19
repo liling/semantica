@@ -37,6 +37,16 @@ def _build_sample_graph() -> ContextGraph:
     graph.add_node("web_dev", node_type="concept", content="Web Development", x=24, y=30)
     graph.add_node("ml", node_type="concept", content="Machine Learning", x=45, y=60)
     graph.add_node(
+        "metformin",
+        node_type="drug",
+        content="Metformin",
+        aliases=["Glucophage"],
+        confidence="0.97",
+        tags=["drug", "featured"],
+        x=22,
+        y=33,
+    )
+    graph.add_node(
         "decision_1",
         node_type="decision",
         content="Approve ML framework",
@@ -243,6 +253,74 @@ class TestSearchAndStats:
         assert payload["query"] == "programming"
         assert payload["total"] >= 1
         assert all(item["node"]["type"] == "language" for item in payload["results"])
+
+    def test_search_exact_and_prefix(self, client):
+        exact_response = client.post(
+            "/api/graph/search",
+            json={"query": "Metformin", "limit": 5},
+        )
+        assert exact_response.status_code == 200
+        exact_payload = exact_response.json()
+        assert exact_payload["results"][0]["node"]["id"] == "metformin"
+
+        prefix_response = client.post(
+            "/api/graph/search",
+            json={"query": "metf", "limit": 5},
+        )
+        assert prefix_response.status_code == 200
+        prefix_payload = prefix_response.json()
+        assert any(item["node"]["id"] == "metformin" for item in prefix_payload["results"])
+
+    def test_search_filters_and_cache_stability(self, client):
+        body = {
+            "query": "framework",
+            "filters": {"type": "decision", "min_confidence": 0.8},
+            "limit": 5,
+        }
+        first_response = client.post("/api/graph/search", json=body)
+        second_response = client.post("/api/graph/search", json=body)
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert first_response.json() == second_response.json()
+        results = first_response.json()["results"]
+        assert [item["node"]["id"] for item in results] == ["decision_1"]
+
+    def test_search_sees_new_nodes_after_mutation(self, client):
+        session = client.app.state.session
+        assert session.add_node(
+            "metformin_hcl",
+            "drug",
+            content="Metformin Hydrochloride",
+            aliases=["Glucophage XR"],
+            confidence="0.93",
+        )
+
+        response = client.post(
+            "/api/graph/search",
+            json={"query": "glucophage", "limit": 10},
+        )
+        assert response.status_code == 200
+        result_ids = [item["node"]["id"] for item in response.json()["results"]]
+        assert "metformin" in result_ids
+        assert "metformin_hcl" in result_ids
+
+    def test_search_secondary_scan_fallback_matches_non_curated_properties(self, client):
+        session = client.app.state.session
+        assert session.add_node(
+            "fallback_node",
+            "entity",
+            content="Alpha",
+            description="rareterm",
+        )
+
+        response = client.post(
+            "/api/graph/search",
+            json={"query": "rareterm", "limit": 10},
+        )
+        assert response.status_code == 200
+        result_ids = [item["node"]["id"] for item in response.json()["results"]]
+        assert "fallback_node" in result_ids
 
     def test_stats(self, client):
         response = client.get("/api/graph/stats")

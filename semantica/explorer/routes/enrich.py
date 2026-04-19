@@ -136,11 +136,11 @@ def _apply_inferred_edges(
             continue
         source, target = args
         if session.get_node(source) is None:
-            session.graph.add_node(source, "entity", content=source)
+            session.add_node(source, "entity", content=source)
         if session.get_node(target) is None:
-            session.graph.add_node(target, "entity", content=target)
+            session.add_node(target, "entity", content=target)
         edge_type = body.inferred_edge_type or predicate
-        session.graph.add_edge(
+        session.add_edge(
             source,
             target,
             edge_type=edge_type,
@@ -354,4 +354,6 @@ async def merge_nodes(
         return removed, edges_updated
 
     removed_ids, edges_updated = await asyncio.to_thread(_do_merge)
+    if removed_ids:
+        await asyncio.to_thread(session.rebuild_search_index)
     return MergeResponse(merged_into=primary_id, removed_ids=removed_ids, edges_updated=edges_updated)

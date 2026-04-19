@@ -1,4 +1,4 @@
-﻿"""
+"""
 Provenance routes for lineage visualization and exportable reports.
 """
 
@@ -9,32 +9,12 @@ from typing import Any, Dict, List, Optional
 import networkx as nx
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse, Response
-from pydantic import BaseModel
 
 from ..dependencies import get_session
+from ..schemas import ProvenanceEdge, ProvenanceNode, ProvenanceResponse
 from ..session import GraphSession
 
 router = APIRouter(prefix="/api/provenance", tags=["Power User Tools"])
-
-
-class ProvenanceNode(BaseModel):
-    id: str
-    label: str
-    prov_type: str
-    parent_id: str
-
-
-class ProvenanceEdge(BaseModel):
-    id: str
-    source: str
-    target: str
-    label: str
-
-
-class ProvenanceResponse(BaseModel):
-    nodes: List[ProvenanceNode]
-    edges: List[ProvenanceEdge]
-
 
 _AGENT_TYPES = {"person", "organization", "system", "agent"}
 _ACTIVITY_TYPES = {"action", "event", "process", "activity", "decision", "publication"}
@@ -67,7 +47,7 @@ def _build_provenance(session: GraphSession, node_id: Optional[str] = None) -> d
         if edge.source_id in hop_nodes or edge.target_id in hop_nodes:
             graph.add_edge(edge.source_id, edge.target_id, label=edge.edge_type)
 
-    subgraph = nx.ego_graph(graph, node_id, radius=2, undirected=False)
+    subgraph = nx.ego_graph(graph, node_id, radius=2, undirected=True)
     provenance_nodes: List[Dict[str, Any]] = []
     for graph_node_id in subgraph.nodes():
         node = session.graph.nodes.get(graph_node_id)
@@ -85,12 +65,19 @@ def _build_provenance(session: GraphSession, node_id: Optional[str] = None) -> d
 
     provenance_edges: List[Dict[str, Any]] = []
     for source, target, data in subgraph.edges(data=True):
+        if target == node_id:
+            direction = "upstream"
+        elif source == node_id:
+            direction = "downstream"
+        else:
+            direction = "lateral"
         provenance_edges.append(
             {
                 "id": f"{source}-{target}",
                 "source": source,
                 "target": target,
                 "label": data.get("label", "related_to"),
+                "direction": direction,
             }
         )
 
@@ -104,7 +91,7 @@ def _build_report(session: GraphSession, node_id: str) -> Dict[str, Any]:
         "node_id": node_id,
         "label": node.get("content", node_id) if node else node_id,
         "type": node.get("type", "entity") if node else "entity",
-        "properties": node.get("properties", {}) if node else {},
+        "properties": node.get("metadata", node.get("properties", {})) if node else {},
         "lineage": provenance,
     }
 
@@ -129,9 +116,29 @@ def _render_markdown(report: Dict[str, Any]) -> str:
     for node in report.get("lineage", {}).get("nodes", []):
         lines.append(f"- `{node['id']}` ({node['prov_type']}): {node['label']}")
 
-    lines.extend(["", "## Lineage Edges"])
-    for edge in report.get("lineage", {}).get("edges", []):
-        lines.append(f"- `{edge['source']}` -[{edge['label']}]-> `{edge['target']}`")
+    edges = report.get("lineage", {}).get("edges", [])
+    grouped_edges: Dict[str, List] = {"upstream": [], "downstream": [], "lateral": []}
+    for edge in edges:
+        direction = edge.get("direction", "lateral")
+        if direction not in grouped_edges:
+            direction = "lateral"
+        grouped_edges[direction].append(edge)
+
+    if grouped_edges["upstream"]:
+        lines.extend(["", "## Upstream"])
+        for edge in grouped_edges["upstream"]:
+            lines.append(f"- `{edge['source']}` -[{edge['label']}]-> `{edge['target']}`")
+
+    if grouped_edges["downstream"]:
+        lines.extend(["", "## Downstream"])
+        for edge in grouped_edges["downstream"]:
+            lines.append(f"- `{edge['source']}` -[{edge['label']}]-> `{edge['target']}`")
+
+    if grouped_edges["lateral"]:
+        lines.extend(["", "## Lateral"])
+        for edge in grouped_edges["lateral"]:
+            lines.append(f"- `{edge['source']}` -[{edge['label']}]-> `{edge['target']}`")
+
     return "\n".join(lines)
 
 
